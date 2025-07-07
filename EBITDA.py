@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import io
 from collections import Counter
 
+# === MAPPING GROUPES (adapte ici si besoin) ===
 mapping = {
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
@@ -109,10 +110,12 @@ if uploaded_file is not None:
             df = pd.read_excel(xls, header=None, skiprows=5)
             df.columns = header_row
 
-        st.dataframe(df.iloc[:, 0], use_container_width=True)
+        # Choix de la colonne d'intitulés charges (libellé) dans l'interface
+        intitulé_col = st.selectbox("Colonne des intitulés (libellé charges)", df.columns)
+        st.dataframe(df[intitulé_col], use_container_width=True)
 
-        df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
-        analyse_cols = [col for col in df.columns if col not in [df.columns[0], "SEGMENT"]]
+        df["SEGMENT"] = df[intitulé_col].apply(get_segment)
+        analyse_cols = [col for col in df.columns if col not in [intitulé_col, "SEGMENT"]]
         for col in analyse_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 

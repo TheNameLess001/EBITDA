@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import io
 from collections import Counter
 
-# --- MAPPING SEGMENTS ---
+# ----------- MAPPING SEGMENTS (à adapter si besoin) -----------
 mapping = {
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
@@ -69,7 +69,7 @@ def make_unique(seq):
     return res
 
 st.set_page_config(page_title="Analyse Charges EBITDA", layout="wide")
-st.title("Analyse des Charges - Segments & Graphique comparatif")
+st.title("Analyse des Charges EBITDA - Version Chérif (Debug & Rapport par segment)")
 
 uploaded_file = st.file_uploader("Importe ton CSV (ou Excel)", type=["csv", "xlsx"])
 
@@ -134,49 +134,59 @@ if uploaded_file is not None:
 
         df = df.loc[:, df.columns.notna() & (df.columns != '')]
 
+        # DEBUG : affichage des colonnes détectées
+        st.write("**Colonnes détectées :**", list(df.columns))
+        st.write("**Premières lignes du dataframe :**")
+        st.dataframe(df.head(10))
+
         df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
-        debit_cols = [c for c in df.columns if "Débit" in c]
-        credit_cols = [c for c in df.columns if "Crédit" in c or "Credit" in c]
-        mois_possibles = sorted(set([c.split()[0] for c in debit_cols if c.split()[0] != 'Intitulé']))
-        mois_selection = st.multiselect("Sélectionne les dates à afficher :", mois_possibles, default=mois_possibles[-1:] if mois_possibles else [])
 
-        # ===================== AFFICHAGE PAR SEGMENT =======================
-        for mois in mois_selection:
-            debit_col = next((c for c in debit_cols if mois == c.split()[0]), None)
-            credit_col = next((c for c in credit_cols if mois == c.split()[0]), None)
-            if debit_col and credit_col:
-                agg = df.groupby("SEGMENT")[[debit_col, credit_col]].sum(numeric_only=True)
-                # Formatage MAD
-                agg_fmt = agg.applymap(lambda x: f"{x:,.0f} MAD" if pd.notnull(x) else "")
-                st.subheader(f"🟦 Tableau : {mois} - Tous segments")
-                st.dataframe(agg_fmt, use_container_width=True)
-                # Séparé : tableau par segment
-                for seg in agg.index:
-                    st.markdown(f"**{seg}**")
-                    st.dataframe(agg_fmt.loc[[seg]], use_container_width=True)
+        # Détection tolérante (accents/espaces)
+        debit_cols = [c for c in df.columns if "debit" in c.lower() or "débit" in c.lower()]
+        credit_cols = [c for c in df.columns if "credit" in c.lower() or "crédit" in c.lower()]
+        st.write("**Colonnes identifiées comme Débit :**", debit_cols)
+        st.write("**Colonnes identifiées comme Crédit :**", credit_cols)
 
-                # ===================== GRAPHIQUE BARRES COMPARATIF =======================
-                total_par_segment = (agg[debit_col] - agg[credit_col]).sort_values(ascending=False)
-                fig, ax = plt.subplots()
-                bars = ax.bar(total_par_segment.index, total_par_segment.values)
-                ax.set_title(f"Comparatif des segments ({mois}) - Total Débit - Crédit (MAD)")
-                ax.set_xlabel("Segment")
-                ax.set_ylabel("Somme (MAD)")
-                ax.bar_label(bars, fmt='%.0f')
-                plt.xticks(rotation=45, ha="right")
-                plt.tight_layout()
-                st.pyplot(fig)
+        mois_possibles = sorted(set([c.split()[0] for c in debit_cols if c.split()[0].lower() != 'intitulé']))
+        st.write("**Dates extraites :**", mois_possibles)
+        if not mois_possibles:
+            st.error("Aucune colonne 'Débit' ou 'Crédit' trouvée. Vérifie le nom exact des colonnes dans ton fichier.")
+        else:
+            mois_selection = st.multiselect("Sélectionne les dates à afficher :", mois_possibles, default=mois_possibles[-1:] if mois_possibles else [])
 
-        # ===================== INTERETS DES EMPRUNTS ET DETTES =======================
-        if "INTERETS DES EMPRUNTS ET DETTES" in df["SEGMENT"].values:
-            st.subheader("INTERETS DES EMPRUNTS ET DETTES :")
-            st.dataframe(df[df["SEGMENT"] == "INTERETS DES EMPRUNTS ET DETTES"], use_container_width=True)
+            # =========== AFFICHAGE PAR SEGMENT ===========
+            for mois in mois_selection:
+                debit_col = next((c for c in debit_cols if mois == c.split()[0]), None)
+                credit_col = next((c for c in credit_cols if mois == c.split()[0]), None)
+                if debit_col and credit_col:
+                    agg = df.groupby("SEGMENT")[[debit_col, credit_col]].sum(numeric_only=True)
+                    agg_fmt = agg.applymap(lambda x: f"{x:,.0f} MAD" if pd.notnull(x) else "")
+                    st.subheader(f"🟦 Tableau général : {mois} - Tous segments")
+                    st.dataframe(agg_fmt, use_container_width=True)
+                    for seg in agg.index:
+                        st.markdown(f"**{seg}**")
+                        st.dataframe(agg_fmt.loc[[seg]], use_container_width=True)
 
-        if mois_selection:
-            export_cols = [c for c in debit_cols + credit_cols if any(m == c.split()[0] for m in mois_selection)]
-            export = df.groupby("SEGMENT")[export_cols].sum()
-            csv = export.to_csv().encode('utf-8')
-            st.download_button("Télécharger le tableau agrégé", csv, "charges_agrégées.csv", "text/csv")
+                    total_par_segment = (agg[debit_col] - agg[credit_col]).sort_values(ascending=False)
+                    fig, ax = plt.subplots()
+                    bars = ax.bar(total_par_segment.index, total_par_segment.values)
+                    ax.set_title(f"Comparatif segments ({mois}) - Total Débit - Crédit (MAD)")
+                    ax.set_xlabel("Segment")
+                    ax.set_ylabel("Somme (MAD)")
+                    ax.bar_label(bars, fmt='%.0f')
+                    plt.xticks(rotation=45, ha="right")
+                    plt.tight_layout()
+                    st.pyplot(fig)
+
+            if "INTERETS DES EMPRUNTS ET DETTES" in df["SEGMENT"].values:
+                st.subheader("INTERETS DES EMPRUNTS ET DETTES :")
+                st.dataframe(df[df["SEGMENT"] == "INTERETS DES EMPRUNTS ET DETTES"], use_container_width=True)
+
+            if mois_selection:
+                export_cols = [c for c in debit_cols + credit_cols if any(m == c.split()[0] for m in mois_selection)]
+                export = df.groupby("SEGMENT")[export_cols].sum()
+                csv = export.to_csv().encode('utf-8')
+                st.download_button("Télécharger le tableau agrégé", csv, "charges_agrégées.csv", "text/csv")
 
     except Exception as e:
         st.error(f"Erreur lors du traitement du fichier : {e}")

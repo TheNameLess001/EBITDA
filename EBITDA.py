@@ -5,7 +5,7 @@ import io
 import re
 from collections import Counter
 
-# ----- Ton mapping (identique à avant, adapte au besoin) -----
+# ----- Ton mapping segments (à compléter comme d'hab) -----
 mapping = {
     # ... ton mapping ici ...
 }
@@ -32,7 +32,7 @@ def make_unique(seq):
     return res
 
 st.set_page_config(page_title="Analyse Charges EBITDA", layout="wide")
-st.title("Analyse des Charges EBITDA – Débit Only")
+st.title("Analyse des Charges EBITDA – Compatible avec tous les exports")
 
 uploaded_file = st.file_uploader("Importe ton CSV ou Excel", type=["csv", "xlsx"])
 
@@ -64,7 +64,6 @@ if uploaded_file is not None:
                     col = ''
                 new_columns.append(col)
             new_columns = make_unique(new_columns)
-            # Ignore colonnes inutiles (Solde, Cumul, Prévisionnel, Crédit, Intitulé...)
             ignore_cols = [col for col in new_columns if "Solde" in col or "Cumul" in col or "Prévisionnel" in col or "Crédit" in col or "Credit" in col or (col == "Intitulé" and new_columns.count("Intitulé") > 1)]
             cols_to_use = [col for col in new_columns if col not in ignore_cols]
             data_lines = lines[5:]
@@ -97,7 +96,7 @@ if uploaded_file is not None:
             df = df[cols_to_use]
 
         df = df.loc[:, df.columns.notna() & (df.columns != '')]
-        st.success("Fichier chargé avec succès ! Affichage des colonnes :")
+        st.success("Fichier chargé avec succès ! Voici les colonnes détectées :")
         for i, c in enumerate(df.columns):
             st.write(f"Colonne {i} : '{c}'")
         st.write("Aperçu du dataframe :")
@@ -105,50 +104,52 @@ if uploaded_file is not None:
 
         df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
 
-        # --- DÉTECTION COLONNES DÉBIT UNIQUEMENT ---
-        debit_cols = [c for c in df.columns if re.search(r'd[ée]bit', c.lower().replace(' ', ''))]
+        # 1️⃣ Tentative détection automatique Débit
+        debit_cols = [c for c in df.columns if 'debit' in c.lower() or 'débit' in c.lower()]
         st.info(f"Détectées : {len(debit_cols)} colonnes Débit.")
+        
+        # 2️⃣ Si aucune colonne détectée, sélection manuelle proposée
         if not debit_cols:
-            st.error("Aucune colonne 'Débit' détectée ! Vérifie le header affiché au-dessus.")
+            st.warning("Aucune colonne 'Débit' détectée automatiquement. Merci de sélectionner la/les colonnes Débit à analyser ci-dessous :")
+            all_cols = [c for c in df.columns if c.strip() not in ["SEGMENT", "Intitulé", "Compte"]]
+            debit_cols = st.multiselect("Choisis les colonnes Débit", all_cols)
+        else:
+            st.success(f"Colonnes Débit détectées automatiquement : {debit_cols}")
+
+        # 3️⃣ Récupère les périodes à afficher (par défaut toutes les colonnes Débit sélectionnées)
+        if not debit_cols:
+            st.error("Aucune colonne Débit sélectionnée, analyse impossible.")
             st.stop()
+        mois_possibles = debit_cols
+        mois_selection = st.multiselect("Sélectionne les colonnes Débit à analyser :", mois_possibles, default=mois_possibles)
 
-        mois_possibles = sorted(set([' '.join(c.split()[:1]) for c in debit_cols]))
-        if not mois_possibles:
-            st.error("Aucune date trouvée dans les colonnes Débit.")
-            st.stop()
-        mois_selection = st.multiselect("Sélectionne les dates à afficher :", mois_possibles, default=mois_possibles[-1:])
+        # Analyse + affichage
+        for col in mois_selection:
+            agg = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
+            agg_fmt = agg.applymap(lambda x: f"{x:,.0f} MAD" if pd.notnull(x) else "")
+            st.subheader(f"Tableau général : {col} - Tous segments")
+            st.dataframe(agg_fmt, use_container_width=True)
+            for seg in agg.index:
+                st.markdown(f"**{seg}**")
+                st.dataframe(agg_fmt.loc[[seg]], use_container_width=True)
 
-        for mois in mois_selection:
-            debit_col = next((c for c in debit_cols if mois == ' '.join(c.split()[:1])), None)
-            if debit_col:
-                agg = df.groupby("SEGMENT")[[debit_col]].sum(numeric_only=True)
-                agg_fmt = agg.applymap(lambda x: f"{x:,.0f} MAD" if pd.notnull(x) else "")
-                st.subheader(f"Tableau général : {mois} - Tous segments")
-                st.dataframe(agg_fmt, use_container_width=True)
-                for seg in agg.index:
-                    st.markdown(f"**{seg}**")
-                    st.dataframe(agg_fmt.loc[[seg]], use_container_width=True)
-
-                # Graph comparatif : Débit only
-                total_par_segment = agg[debit_col].sort_values(ascending=False)
-                fig, ax = plt.subplots()
-                bars = ax.bar(total_par_segment.index, total_par_segment.values)
-                ax.set_title(f"Comparatif segments ({mois}) - Débit (MAD)")
-                ax.set_xlabel("Segment")
-                ax.set_ylabel("Somme (MAD)")
-                ax.bar_label(bars, fmt='%.0f')
-                plt.xticks(rotation=45, ha="right")
-                plt.tight_layout()
-                st.pyplot(fig)
-            else:
-                st.warning(f"Aucune donnée pour le mois {mois} (ou colonne mal détectée)")
+            total_par_segment = agg[col].sort_values(ascending=False)
+            fig, ax = plt.subplots()
+            bars = ax.bar(total_par_segment.index, total_par_segment.values)
+            ax.set_title(f"Comparatif segments ({col}) - Débit (MAD)")
+            ax.set_xlabel("Segment")
+            ax.set_ylabel("Somme (MAD)")
+            ax.bar_label(bars, fmt='%.0f')
+            plt.xticks(rotation=45, ha="right")
+            plt.tight_layout()
+            st.pyplot(fig)
 
         if "INTERETS DES EMPRUNTS ET DETTES" in df["SEGMENT"].values:
             st.subheader("INTERETS DES EMPRUNTS ET DETTES :")
             st.dataframe(df[df["SEGMENT"] == "INTERETS DES EMPRUNTS ET DETTES"], use_container_width=True)
 
         if mois_selection:
-            export_cols = [c for c in debit_cols if any(m == ' '.join(c.split()[:1]) for m in mois_selection)]
+            export_cols = mois_selection
             export = df.groupby("SEGMENT")[export_cols].sum()
             csv = export.to_csv().encode('utf-8')
             st.download_button("Télécharger le tableau agrégé", csv, "charges_agrégées.csv", "text/csv")

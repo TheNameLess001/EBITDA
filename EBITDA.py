@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import io
 
-# Ton mapping reste inchangé...
+# Mapping segments
 mapping = {
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
@@ -55,93 +55,101 @@ def get_segment(nom):
         return "INTERETS DES EMPRUNTS ET DETTES"
     return "Autres"
 
-st.title("Analyse des Charges - Fichiers à Deux Lignes d'En-tête (Dates fin de mois)")
+st.set_page_config(page_title="Analyse des Charges EBITDA", layout="wide")
+st.title("Analyse des Charges - Fichiers à Deux Lignes d'En-tête (Date fin de mois + Débit/Crédit)")
 
 uploaded_file = st.file_uploader("Importe ton CSV (ou Excel)", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
-    if uploaded_file.name.endswith('.csv'):
-        # Encodage & séparateur auto
-        content = uploaded_file.read()
-        encodings = ['utf-8', 'ISO-8859-1', 'latin1']
-        for enc in encodings:
-            try:
-                s = content.decode(enc)
-                break
-            except:
-                continue
-        file_buffer = io.StringIO(s)
-        pre_header = pd.read_csv(file_buffer, sep=None, engine='python', header=None, nrows=6)
-        file_buffer.seek(0)
-    else:
-        pre_header = pd.read_excel(uploaded_file, header=None, nrows=6)
-
-    # Ligne 4 = index 3 (dates), Ligne 5 = index 4 (Débit/Crédit)
-    date_row = pre_header.iloc[3].fillna('')
-    sous_row = pre_header.iloc[4].fillna('')
-    new_columns = []
-    for date, sous in zip(date_row, sous_row):
-        if sous and sous != 'Intitulé':
-            col = f"{str(date).strip()} {str(sous).strip()}"
-        elif sous:
-            col = sous.strip()
-        elif date:
-            col = str(date).strip()
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            content = uploaded_file.read()
+            encodings = ['utf-8', 'ISO-8859-1', 'latin1']
+            for enc in encodings:
+                try:
+                    s = content.decode(enc)
+                    break
+                except:
+                    continue
+            lines = s.splitlines()
+            # Détection séparateur sur la 6ème ligne
+            sep_candidates = [';', ',', '\t', '|']
+            sep = max(sep_candidates, key=lambda c: lines[5].count(c))
+            file_buffer = io.StringIO(s)
+            pre_header = pd.read_csv(file_buffer, sep=sep, header=None, nrows=6)
+            file_buffer.seek(0)
         else:
-            col = ''
-        new_columns.append(col)
+            pre_header = pd.read_excel(uploaded_file, header=None, nrows=6)
 
-    # Lecture du reste du fichier
-    if uploaded_file.name.endswith('.csv'):
-        file_buffer.seek(0)
-        df = pd.read_csv(file_buffer, sep=None, engine='python', skiprows=5, header=None)
-    else:
-        df = pd.read_excel(uploaded_file, header=None, skiprows=5)
-    df.columns = new_columns
+        # Reconstruire les colonnes : ligne 4 (dates), ligne 5 (Débit/Crédit/Intitulé)
+        date_row = pre_header.iloc[3].fillna('')
+        sous_row = pre_header.iloc[4].fillna('')
+        new_columns = []
+        for date, sous in zip(date_row, sous_row):
+            if sous and sous != 'Intitulé':
+                col = f"{str(date).strip()} {str(sous).strip()}"
+            elif sous:
+                col = sous.strip()
+            elif date:
+                col = str(date).strip()
+            else:
+                col = ''
+            new_columns.append(col)
 
-    # Nettoie les colonnes vides
-    df = df.loc[:, df.columns.notna() & (df.columns != '')]
+        # Lecture du reste des données
+        if uploaded_file.name.endswith('.csv'):
+            file_buffer.seek(0)
+            df = pd.read_csv(file_buffer, sep=sep, skiprows=5, header=None)
+        else:
+            df = pd.read_excel(uploaded_file, header=None, skiprows=5)
+        df.columns = new_columns
+        df = df.loc[:, df.columns.notna() & (df.columns != '')]
 
-    st.subheader("Aperçu fichier (colonnes reconstruites)")
-    st.dataframe(df.head(20))
+        st.subheader("Aperçu du fichier importé (colonnes reconstruites)")
+        st.dataframe(df.head(20), use_container_width=True)
 
-    # Mapping segment
-    df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
+        # Mapping segment
+        df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
 
-    # Détection auto des colonnes Débit/Crédit
-    debit_cols = [c for c in df.columns if "Débit" in c]
-    credit_cols = [c for c in df.columns if "Crédit" in c or "Credit" in c]
+        # Colonnes Débit/Crédit
+        debit_cols = [c for c in df.columns if "Débit" in c]
+        credit_cols = [c for c in df.columns if "Crédit" in c or "Credit" in c]
 
-    # Extraire la partie date pour sélection mois
-    mois_possibles = sorted(set([c.split()[0] for c in debit_cols if c.split()[0] != 'Intitulé']))
-    mois_selection = st.multiselect("Sélectionne les dates à afficher :", mois_possibles, default=mois_possibles[-1:] if mois_possibles else [])
+        # Dates (fin de mois) à sélectionner
+        mois_possibles = sorted(set([c.split()[0] for c in debit_cols if c.split()[0] != 'Intitulé']))
+        mois_selection = st.multiselect("Sélectionne les dates à afficher :", mois_possibles, default=mois_possibles[-1:] if mois_possibles else [])
 
-    for mois in mois_selection:
-        debit_col = next((c for c in debit_cols if mois == c.split()[0]), None)
-        credit_col = next((c for c in credit_cols if mois == c.split()[0]), None)
-        if debit_col and credit_col:
-            agg = df.groupby("SEGMENT")[[debit_col, credit_col]].sum(numeric_only=True)
-            st.subheader(f"Charges par segment - {mois}")
-            st.dataframe(agg)
-            # Graphe
-            fig, ax = plt.subplots()
-            agg[debit_col].plot(kind="bar", label="Débit", alpha=0.7, ax=ax)
-            agg[credit_col].plot(kind="bar", label="Crédit", alpha=0.7, color="orange", ax=ax)
-            plt.title(f"Débits & Crédits par segment ({mois})")
-            plt.xlabel("Segment")
-            plt.ylabel("Montant")
-            plt.legend()
-            st.pyplot(fig)
+        for mois in mois_selection:
+            debit_col = next((c for c in debit_cols if mois == c.split()[0]), None)
+            credit_col = next((c for c in credit_cols if mois == c.split()[0]), None)
+            if debit_col and credit_col:
+                agg = df.groupby("SEGMENT")[[debit_col, credit_col]].sum(numeric_only=True)
+                st.subheader(f"Charges par segment - {mois}")
+                st.dataframe(agg, use_container_width=True)
+                # Graphe
+                fig, ax = plt.subplots()
+                agg[debit_col].plot(kind="bar", label="Débit", alpha=0.7, ax=ax)
+                agg[credit_col].plot(kind="bar", label="Crédit", alpha=0.7, color="orange", ax=ax)
+                plt.title(f"Débits & Crédits par segment ({mois})")
+                plt.xlabel("Segment")
+                plt.ylabel("Montant")
+                plt.legend()
+                plt.tight_layout()
+                st.pyplot(fig)
 
-    if "INTERETS DES EMPRUNTS ET DETTES" in df["SEGMENT"].values:
-        st.subheader("INTERETS DES EMPRUNTS ET DETTES :")
-        st.dataframe(df[df["SEGMENT"] == "INTERETS DES EMPRUNTS ET DETTES"])
+        # Afficher INTERETS DES EMPRUNTS ET DETTES à part
+        if "INTERETS DES EMPRUNTS ET DETTES" in df["SEGMENT"].values:
+            st.subheader("INTERETS DES EMPRUNTS ET DETTES :")
+            st.dataframe(df[df["SEGMENT"] == "INTERETS DES EMPRUNTS ET DETTES"], use_container_width=True)
 
-    if mois_selection:
-        export = df.groupby("SEGMENT")[[c for c in debit_cols + credit_cols if any(m == c.split()[0] for m in mois_selection)]].sum()
-        csv = export.to_csv().encode('utf-8')
-        st.download_button("Télécharger le tableau agrégé", csv, "charges_agrégées.csv", "text/csv")
+        # Export CSV agrégé
+        if mois_selection:
+            export_cols = [c for c in debit_cols + credit_cols if any(m == c.split()[0] for m in mois_selection)]
+            export = df.groupby("SEGMENT")[export_cols].sum()
+            csv = export.to_csv().encode('utf-8')
+            st.download_button("Télécharger le tableau agrégé", csv, "charges_agrégées.csv", "text/csv")
 
+    except Exception as e:
+        st.error(f"Erreur lors du traitement du fichier : {e}")
 else:
-    st.info("Uploade un fichier CSV ou Excel (format à deux lignes d'en-tête : date + débit/crédit) pour commencer l'analyse.")
-
+    st.info("Uploade un fichier CSV ou Excel (2 lignes d'en-tête : date fin de mois + Débit/Crédit) pour commencer l'analyse.")

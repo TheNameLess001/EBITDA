@@ -4,17 +4,11 @@ import matplotlib.pyplot as plt
 import io
 from collections import Counter
 
-# MAPPING À ADAPTER AVEC TES VRAIS INTITULÉS COLONNE !
 mapping = {
-    "ACHATS": [
-        "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
-        "STOCK INITIAL", "STOCK FINAL", "ACHATS LYDEC (EAU+ELECTRICITE)", "ACHATS DE PETITS EQUIPEMENTS FOURNITURES",
-        "ACHAT TENUES", "ACHATS DE FOURNITURES DE BUREAU"
-    ],
-    "SERVICES": [
-        "CONVENTION MEDECIN (1an)", "HONORAIRES COMPTA (moore)", "HONORAIRES SOCIAL (moore)", "HONORAIRES DIVERS"
-    ],
-    # ... AJOUTE TOUS TES SEGMENTS ...
+    # Mets ici ton mapping complet (copie les intitulés EXACTS de ta première colonne)
+    "ACHATS": ["ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", ...],
+    "SERVICES": ["CONVENTION MEDECIN (1an)", "HONORAIRES COMPTA (moore)", ...],
+    # ...
 }
 special_line = "INTERETS DES EMPRUNTS ET DETTES"
 
@@ -39,8 +33,7 @@ def make_unique(seq):
     return res
 
 st.set_page_config(layout="wide")
-
-uploaded_file = st.file_uploader("CSV/Excel", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Fichier", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
@@ -71,27 +64,29 @@ if uploaded_file is not None:
             df = pd.read_excel(xls, header=None, skiprows=5)
             df.columns = header_row
 
-        possible_cols = [col for col in df.columns]
-        intitulé_col = st.selectbox("Colonne intitulé", possible_cols, 0)
-        analyse_cols = [col for col in df.columns if col != intitulé_col]
+        # 1. Afficher toutes les lignes de la première colonne (intitulés charges)
+        st.dataframe(df.iloc[:, 0], use_container_width=True)
 
-        for col in analyse_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+        # 2. Mapping segment
+        df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
+        analyse_cols = [col for col in df.columns if col not in [df.columns[0], "SEGMENT"]]
 
-        df["SEGMENT"] = df[intitulé_col].apply(get_segment)
-
-        agg_global = df.groupby("SEGMENT")[analyse_cols].sum(numeric_only=True)
-        st.dataframe(agg_global, use_container_width=True)
-
-        mois_selection = st.multiselect("Vue par mois :", analyse_cols, default=[analyse_cols[-1]])
-
-        for col in mois_selection:
-            agg = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
+        # 3. Vue tableau pour chaque segment
+        for seg in df["SEGMENT"].unique():
+            sub_df = df[df["SEGMENT"] == seg]
+            if len(sub_df) == 0 or seg == "":
+                continue
+            st.subheader(seg)
+            agg = sub_df[analyse_cols].apply(pd.to_numeric, errors='coerce').sum().to_frame().T
+            agg.index = [seg]
             st.dataframe(agg, use_container_width=True)
-            total_par_segment = agg[col].sort_values(ascending=False)
+
+        # 4. Graphique pour chaque colonne/mois
+        for col in analyse_cols:
+            agg = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
             fig, ax = plt.subplots()
-            bars = ax.bar(total_par_segment.index, total_par_segment.values)
-            ax.set_title(f"Comparatif {col}")
+            bars = ax.bar(agg.index, agg[col])
+            ax.set_title(col)
             plt.xticks(rotation=45, ha="right")
             plt.tight_layout()
             st.pyplot(fig)

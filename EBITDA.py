@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import io
-import re
 from collections import Counter
 
 # ----- Mapping segments -----
@@ -31,13 +30,8 @@ def make_unique(seq):
             res.append(s)
     return res
 
-def detect_date_cols(cols):
-    # Match toute date en début ou dans la colonne, ex: "31/01/2025 Débit" ou "31-01-2025 Crédit"
-    pattern = r'\b\d{2}[-/.]\d{2}[-/.]\d{4}\b'
-    return [c for c in cols if re.search(pattern, c)]
-
 st.set_page_config(page_title="Analyse Charges EBITDA", layout="wide")
-st.title("Analyse Charges EBITDA – Uniquement colonnes date fin de mois")
+st.title("Analyse Charges EBITDA – Sélection libre des colonnes")
 
 uploaded_file = st.file_uploader("Importe ton CSV ou Excel", type=["csv", "xlsx"])
 
@@ -109,15 +103,14 @@ if uploaded_file is not None:
 
         df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
 
-        # --------- Colonnes qui contiennent une date ----------
-        date_cols = detect_date_cols(df.columns)
-        st.info(f"Colonnes contenant une date (fin de mois) : {date_cols}")
+        # --------- Sélection libre ----------
+        possible_cols = [col for col in df.columns if col not in ["SEGMENT", "Intitulé", "Compte"] and df[col].dtype != 'O']
+        st.info(f"Tu peux choisir TOUTES les colonnes numériques à analyser ici :")
+        cols_selection = st.multiselect("Sélectionne les colonnes à analyser :", possible_cols, default=possible_cols)
 
-        if not date_cols:
-            st.error("Aucune colonne contenant une date de fin de mois détectée ! Vérifie les headers ou contacte ton DAF 😅")
+        if not cols_selection:
+            st.warning("Aucune colonne sélectionnée, rien à afficher.")
             st.stop()
-
-        cols_selection = st.multiselect("Sélectionne les colonnes à analyser :", date_cols, default=date_cols)
 
         for col in cols_selection:
             agg = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
@@ -153,4 +146,4 @@ if uploaded_file is not None:
         st.error(f"Erreur lors du traitement du fichier : {e}")
 
 else:
-    st.info("Uploade un fichier CSV ou Excel (avec dates fin de mois en en-tête) pour commencer l'analyse.")
+    st.info("Uploade un fichier CSV ou Excel pour commencer l'analyse.")

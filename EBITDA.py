@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import io
 from collections import Counter
 
-# === MAPPING GROUPES (adapte ici si besoin) ===
 mapping = {
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
@@ -60,9 +59,9 @@ special_line = "INTERETS DES EMPRUNTS ET DETTES"
 
 def get_segment(nom):
     for seg, lignes in mapping.items():
-        if str(nom).strip().upper() in [x.strip().upper() for x in lignes]:
+        if isinstance(nom, str) and nom.strip().upper() in [x.strip().upper() for x in lignes]:
             return seg
-    if str(nom).strip().upper() == special_line:
+    if isinstance(nom, str) and nom.strip().upper() == special_line:
         return "INTERETS DES EMPRUNTS ET DETTES"
     return "Autres"
 
@@ -83,6 +82,7 @@ uploaded_file = st.file_uploader("Fichier", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
+        # Read file
         if uploaded_file.name.endswith('.csv'):
             content = uploaded_file.read()
             encodings = ['utf-8', 'ISO-8859-1', 'latin1']
@@ -94,6 +94,7 @@ if uploaded_file is not None:
                     continue
             lines = s.splitlines()
             sep_candidates = [';', ',', '\t', '|']
+            # Supposons que la ligne 4 est toujours le header principal (modifiable si besoin !)
             sep = max(sep_candidates, key=lambda c: lines[3].count(c))
             header_row = lines[3].split(sep)
             header_row = [str(x).strip() for x in header_row]
@@ -110,22 +111,53 @@ if uploaded_file is not None:
             df = pd.read_excel(xls, header=None, skiprows=5)
             df.columns = header_row
 
-        # Choix de la colonne d'intitulés charges (libellé) dans l'interface
-        intitulé_col = st.selectbox("Colonne des intitulés (libellé charges)", df.columns)
-        st.dataframe(df[intitulé_col], use_container_width=True)
+        # Détection automatique de la colonne d'intitulé (première colonne qui matche un nom du mapping)
+        charge_names = set()
+        for lignes in mapping.values():
+            charge_names.update([x.strip().upper() for x in lignes])
+        detected_intitule_col = None
+        for col in df.columns:
+            sample = df[col].astype(str).str.strip().str.upper()
+            if sample.isin(charge_names).any():
+                detected_intitule_col = col
+                break
+        if detected_intitule_col is None:
+            st.error("Impossible de détecter la colonne d'intitulé charges automatiquement. Vérifie ton mapping et la structure du fichier.")
+            st.stop()
 
-        df["SEGMENT"] = df[intitulé_col].apply(get_segment)
-        analyse_cols = [col for col in df.columns if col not in [intitulé_col, "SEGMENT"]]
+        st.write(f"Colonne des intitulés détectée automatiquement : **{detected_intitule_col}**")
+        st.dataframe(df[detected_intitule_col], use_container_width=True)
+
+        # On considère tout le reste comme colonnes analytiques (sauf "Compte" ou codes pures)
+        analyse_cols = []
+        for col in df.columns:
+            if col == detected_intitule_col:
+                continue
+            try:
+                test_numeric = pd.to_numeric(df[col], errors='coerce')
+                if test_numeric.notnull().sum() > 0 and "compte" not in col.lower():
+                    analyse_cols.append(col)
+            except:
+                pass
+
+        if not analyse_cols:
+            st.error("Aucune colonne numérique/mois détectée pour l'analyse.")
+            st.stop()
+
+        df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
         for col in analyse_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # Tableau global
         agg = df.groupby("SEGMENT")[analyse_cols].sum(numeric_only=True)
         st.dataframe(agg, use_container_width=True)
 
+        # Un tableau par segment
         for seg in agg.index:
             st.subheader(seg)
             st.dataframe(agg.loc[[seg]], use_container_width=True)
 
+        # Un graph par mois
         for col in analyse_cols:
             vals = agg[col].sort_values(ascending=False)
             fig, ax = plt.subplots()

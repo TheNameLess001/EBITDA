@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import io
 from collections import Counter
 
-# --- MAPPING SEGMENTS (copie le tien ici si besoin) ---
+# --- MAPPING SEGMENTS ---
 mapping = {
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
@@ -69,7 +69,7 @@ def make_unique(seq):
     return res
 
 st.set_page_config(page_title="Analyse Charges EBITDA", layout="wide")
-st.title("Analyse des Charges - Fichier à en-têtes fusionnées (dates fin de mois + Débit/Crédit)")
+st.title("Analyse des Charges - Segments & Graphique comparatif")
 
 uploaded_file = st.file_uploader("Importe ton CSV (ou Excel)", type=["csv", "xlsx"])
 
@@ -85,10 +85,8 @@ if uploaded_file is not None:
                 except:
                     continue
             lines = s.splitlines()
-            # Détection séparateur sur la 6ème ligne réelle (index 5)
             sep_candidates = [';', ',', '\t', '|']
             sep = max(sep_candidates, key=lambda c: lines[5].count(c))
-            # Header lignes 4 et 5
             header_date = lines[3].split(sep)
             header_type = lines[4].split(sep)
             new_columns = []
@@ -102,12 +100,9 @@ if uploaded_file is not None:
                 else:
                     col = ''
                 new_columns.append(col)
-            # PATCH : rendre chaque colonne unique
             new_columns = make_unique(new_columns)
-            # Supprime les colonnes "Cumul", "Prévisionnel", "Intitulé" secondaires
             ignore_cols = [col for col in new_columns if "Cumul" in col or "Prévisionnel" in col or (col == "Intitulé" and new_columns.count("Intitulé") > 1)]
             cols_to_use = [col for col in new_columns if col not in ignore_cols]
-            # Lecture du dataframe : données réelles à partir de ligne 6 (index 5)
             data_lines = lines[5:]
             s_data = "\n".join(data_lines)
             file_buffer = io.StringIO(s_data)
@@ -115,7 +110,6 @@ if uploaded_file is not None:
             df.columns = new_columns
             df = df[cols_to_use]
         else:
-            # Excel direct
             xls = pd.ExcelFile(uploaded_file)
             pre_header = pd.read_excel(xls, header=None, nrows=6)
             date_row = pre_header.iloc[3].fillna('')
@@ -140,33 +134,40 @@ if uploaded_file is not None:
 
         df = df.loc[:, df.columns.notna() & (df.columns != '')]
 
-        st.subheader("Aperçu fichier importé (colonnes reconstituées)")
-        st.dataframe(df.head(20), use_container_width=True)
-
         df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
         debit_cols = [c for c in df.columns if "Débit" in c]
         credit_cols = [c for c in df.columns if "Crédit" in c or "Credit" in c]
         mois_possibles = sorted(set([c.split()[0] for c in debit_cols if c.split()[0] != 'Intitulé']))
         mois_selection = st.multiselect("Sélectionne les dates à afficher :", mois_possibles, default=mois_possibles[-1:] if mois_possibles else [])
 
+        # ===================== AFFICHAGE PAR SEGMENT =======================
         for mois in mois_selection:
             debit_col = next((c for c in debit_cols if mois == c.split()[0]), None)
             credit_col = next((c for c in credit_cols if mois == c.split()[0]), None)
             if debit_col and credit_col:
                 agg = df.groupby("SEGMENT")[[debit_col, credit_col]].sum(numeric_only=True)
-                st.subheader(f"Charges par segment - {mois}")
-                st.dataframe(agg, use_container_width=True)
+                # Formatage MAD
+                agg_fmt = agg.applymap(lambda x: f"{x:,.0f} MAD" if pd.notnull(x) else "")
+                st.subheader(f"🟦 Tableau : {mois} - Tous segments")
+                st.dataframe(agg_fmt, use_container_width=True)
+                # Séparé : tableau par segment
+                for seg in agg.index:
+                    st.markdown(f"**{seg}**")
+                    st.dataframe(agg_fmt.loc[[seg]], use_container_width=True)
+
+                # ===================== GRAPHIQUE BARRES COMPARATIF =======================
+                total_par_segment = (agg[debit_col] - agg[credit_col]).sort_values(ascending=False)
                 fig, ax = plt.subplots()
-                agg[debit_col].plot(kind="bar", label="Débit", alpha=0.7, ax=ax)
-                agg[credit_col].plot(kind="bar", label="Crédit", alpha=0.7, color="orange", ax=ax)
-                plt.title(f"Débits & Crédits par segment ({mois})")
-                plt.xlabel("Segment")
-                plt.ylabel("Montant")
-                plt.legend()
+                bars = ax.bar(total_par_segment.index, total_par_segment.values)
+                ax.set_title(f"Comparatif des segments ({mois}) - Total Débit - Crédit (MAD)")
+                ax.set_xlabel("Segment")
+                ax.set_ylabel("Somme (MAD)")
+                ax.bar_label(bars, fmt='%.0f')
+                plt.xticks(rotation=45, ha="right")
                 plt.tight_layout()
                 st.pyplot(fig)
 
-        # Cas particulier INTERETS
+        # ===================== INTERETS DES EMPRUNTS ET DETTES =======================
         if "INTERETS DES EMPRUNTS ET DETTES" in df["SEGMENT"].values:
             st.subheader("INTERETS DES EMPRUNTS ET DETTES :")
             st.dataframe(df[df["SEGMENT"] == "INTERETS DES EMPRUNTS ET DETTES"], use_container_width=True)
@@ -179,5 +180,6 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error(f"Erreur lors du traitement du fichier : {e}")
+
 else:
     st.info("Uploade un fichier CSV ou Excel (2 lignes d'en-tête : date fin de mois + Débit/Crédit) pour commencer l'analyse.")

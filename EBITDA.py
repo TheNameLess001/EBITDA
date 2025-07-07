@@ -4,9 +4,10 @@ import matplotlib.pyplot as plt
 import io
 from collections import Counter
 
-# Ton mapping segments
+# Ton mapping segments (exemple à compléter avec tes propres segments !)
 mapping = {
-    # ... Ton mapping ici ...
+    # "ACHATS": ["ACHATS DE MARCHANDISES revente", ...],
+    # ...
 }
 special_line = "INTERETS DES EMPRUNTS ET DETTES"
 
@@ -31,13 +32,13 @@ def make_unique(seq):
     return res
 
 st.set_page_config(page_title="Analyse Charges EBITDA", layout="wide")
-st.title("Analyse Charges EBITDA – Colonnes = Ligne 4 Only")
+st.title("Analyse Charges EBITDA – Sélection manuelle de la colonne d’intitulé")
 
 uploaded_file = st.file_uploader("Importe ton CSV ou Excel", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # --- 1. Lecture brute du header (ligne 4 uniquement) ---
+        # 1. Prendre le header colonne dans la LIGNE 4 seulement
         if uploaded_file.name.endswith('.csv'):
             content = uploaded_file.read()
             encodings = ['utf-8', 'ISO-8859-1', 'latin1']
@@ -66,24 +67,23 @@ if uploaded_file is not None:
             df = pd.read_excel(xls, header=None, skiprows=5)
             df.columns = header_row
 
-        # --- 2. Segment mapping ---
-        df["SEGMENT"] = df.iloc[:, 0].apply(get_segment)
-
         st.success("Colonnes lues depuis la ligne 4 :")
-        for i, c in enumerate(df.columns):
-            st.write(f"Colonne {i} : '{c}'")
-        st.write("Aperçu du dataframe :")
+        st.write(list(df.columns))
         st.dataframe(df.head(8))
 
-        # --- 3. Sélection des colonnes à analyser ---
-        possible_cols = [col for col in df.columns if col not in ["SEGMENT", "Intitulé", "Compte"]]
-        cols_selection = st.multiselect("Sélectionne les colonnes à analyser :", possible_cols, default=possible_cols)
+        # 2. Sélection de la colonne des intitulés (manuelle)
+        possible_cols = [col for col in df.columns if col not in ["SEGMENT"]]
+        intitulé_col = st.selectbox("Choisis la colonne des intitulés de charges (celle avec les noms à grouper)", possible_cols, 0)
 
-        if not cols_selection:
-            st.warning("Aucune colonne sélectionnée, rien à afficher.")
-            st.stop()
+        # 3. Sélection des colonnes à analyser (toutes les autres sauf la colonne intitulé choisie)
+        analyse_cols = [col for col in df.columns if col != intitulé_col]
 
-        # --- 4. Affichage des tableaux et graphes ---
+        cols_selection = st.multiselect("Sélectionne les colonnes à analyser :", analyse_cols, default=analyse_cols)
+
+        # 4. Mapping segment selon la colonne sélectionnée
+        df["SEGMENT"] = df[intitulé_col].apply(get_segment)
+
+        # 5. Tableaux et graphes
         for col in cols_selection:
             try:
                 df[col] = pd.to_numeric(df[col], errors='coerce')

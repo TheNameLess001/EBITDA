@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import io
 from collections import Counter
 
-# Ton mapping segments (exemple à compléter avec tes propres segments !)
+# Mapping segments à compléter avec tes vrais segments !
 mapping = {
     # "ACHATS": ["ACHATS DE MARCHANDISES revente", ...],
     # ...
@@ -31,14 +31,14 @@ def make_unique(seq):
             res.append(s)
     return res
 
-st.set_page_config(page_title="Analyse Charges EBITDA", layout="wide")
-st.title("Analyse Charges EBITDA – Sélection manuelle de la colonne d’intitulé")
+st.set_page_config(page_title="Reporting Charges Club", layout="wide")
+st.title("Reporting Charges Club : Vue globale + par mois + graphique")
 
 uploaded_file = st.file_uploader("Importe ton CSV ou Excel", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # 1. Prendre le header colonne dans la LIGNE 4 seulement
+        # Lecture header ligne 4
         if uploaded_file.name.endswith('.csv'):
             content = uploaded_file.read()
             encodings = ['utf-8', 'ISO-8859-1', 'latin1']
@@ -54,7 +54,6 @@ if uploaded_file is not None:
             header_row = lines[3].split(sep)
             header_row = [str(x).strip() for x in header_row]
             header_row = make_unique(header_row)
-            # Les données démarrent à la ligne 6 (index 5)
             data_lines = lines[5:]
             s_data = "\n".join(data_lines)
             file_buffer = io.StringIO(s_data)
@@ -67,56 +66,60 @@ if uploaded_file is not None:
             df = pd.read_excel(xls, header=None, skiprows=5)
             df.columns = header_row
 
-        st.success("Colonnes lues depuis la ligne 4 :")
-        st.write(list(df.columns))
-        st.dataframe(df.head(8))
+        # Sélection de la colonne d'intitulés
+        possible_cols = [col for col in df.columns if col.lower() not in ["segment"]]
+        intitulé_col = st.selectbox("Choisis la colonne des intitulés de charges :", possible_cols, 0)
 
-        # 2. Sélection de la colonne des intitulés (manuelle)
-        possible_cols = [col for col in df.columns if col not in ["SEGMENT"]]
-        intitulé_col = st.selectbox("Choisis la colonne des intitulés de charges (celle avec les noms à grouper)", possible_cols, 0)
-
-        # 3. Sélection des colonnes à analyser (toutes les autres sauf la colonne intitulé choisie)
+        # Colonnes analytiques (chiffrées, hors intitulé)
         analyse_cols = [col for col in df.columns if col != intitulé_col]
-
-        cols_selection = st.multiselect("Sélectionne les colonnes à analyser :", analyse_cols, default=analyse_cols)
-
-        # 4. Mapping segment selon la colonne sélectionnée
-        df["SEGMENT"] = df[intitulé_col].apply(get_segment)
-
-        # 5. Tableaux et graphes
-        for col in cols_selection:
+        # Ne garder que les colonnes numériques
+        num_cols = []
+        for col in analyse_cols:
             try:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
+                if df[col].notnull().sum() > 0:
+                    num_cols.append(col)
             except:
                 pass
+
+        # Mapping segments
+        df["SEGMENT"] = df[intitulé_col].apply(get_segment)
+
+        st.success(f"Mapping segment OK. Colonnes analytiques : {num_cols}")
+
+        # 1️⃣ --- Tableau global : tous les mois, par segment ---
+        agg_global = df.groupby("SEGMENT")[num_cols].sum(numeric_only=True)
+        agg_global_fmt = agg_global.applymap(lambda x: f"{x:,.0f} MAD" if pd.notnull(x) else "")
+        st.subheader("🟦 Tableau Global - Tous Segments x Tous Mois")
+        st.dataframe(agg_global_fmt, use_container_width=True)
+
+        # 2️⃣ --- Vue par mois ---
+        mois_selection = st.multiselect("Sélectionne un ou plusieurs mois à détailler :", num_cols, default=[num_cols[-1]] if num_cols else [])
+
+        for col in mois_selection:
             agg = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
             agg_fmt = agg.applymap(lambda x: f"{x:,.0f} MAD" if pd.notnull(x) else "")
-            st.subheader(f"Tableau général : {col} - Tous segments")
+            st.subheader(f"Tableau par segment : {col}")
             st.dataframe(agg_fmt, use_container_width=True)
-            for seg in agg.index:
-                st.markdown(f"**{seg}**")
-                st.dataframe(agg_fmt.loc[[seg]], use_container_width=True)
-            if agg[col].sum() > 0:
-                total_par_segment = agg[col].sort_values(ascending=False)
-                fig, ax = plt.subplots()
-                bars = ax.bar(total_par_segment.index, total_par_segment.values)
-                ax.set_title(f"Comparatif segments ({col})")
-                ax.set_xlabel("Segment")
-                ax.set_ylabel("Somme (MAD)")
-                ax.bar_label(bars, fmt='%.0f')
-                plt.xticks(rotation=45, ha="right")
-                plt.tight_layout()
-                st.pyplot(fig)
-            else:
-                st.info(f"Colonne {col} : pas de données numériques à afficher.")
+            # 3️⃣ --- Graphique ---
+            total_par_segment = agg[col].sort_values(ascending=False)
+            fig, ax = plt.subplots()
+            bars = ax.bar(total_par_segment.index, total_par_segment.values)
+            ax.set_title(f"Comparatif segments ({col})")
+            ax.set_xlabel("Segment")
+            ax.set_ylabel("Somme (MAD)")
+            ax.bar_label(bars, fmt='%.0f')
+            plt.xticks(rotation=45, ha="right")
+            plt.tight_layout()
+            st.pyplot(fig)
 
+        # Détail INTERETS
         if "INTERETS DES EMPRUNTS ET DETTES" in df["SEGMENT"].values:
             st.subheader("INTERETS DES EMPRUNTS ET DETTES :")
             st.dataframe(df[df["SEGMENT"] == "INTERETS DES EMPRUNTS ET DETTES"], use_container_width=True)
 
-        if cols_selection:
-            export_cols = cols_selection
-            export = df.groupby("SEGMENT")[export_cols].sum()
+        if num_cols:
+            export = agg_global
             csv = export.to_csv().encode('utf-8')
             st.download_button("Télécharger le tableau agrégé", csv, "charges_agrégées.csv", "text/csv")
 

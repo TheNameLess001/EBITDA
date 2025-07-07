@@ -2,9 +2,49 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import io
+from collections import Counter
 
-mapping = {  # ... (mapping identique à avant) ...
-    # [COLLE ICI TON DICT SEGMENTS]
+# --- MAPPING SEGMENTS (copie le tien ici si besoin) ---
+mapping = {
+    "ACHATS": [
+        "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
+        "STOCK INITIAL", "STOCK FINAL", "ACHATS LYDEC (EAU+ELECTRICITE)", "ACHATS DE PETITS EQUIPEMENTS FOURNITURES",
+        "ACHAT TENUES", "ACHATS DE FOURNITURES DE BUREAU"
+    ],
+    "Services professionnels": [
+        "CONVENTION MEDECIN (1an)", "HONORAIRES COMPTA (moore)", "HONORAIRES SOCIAL (moore)",
+        "HONORAIRES DIVERS", "HONO PRESTATION FPK MAROC"
+    ],
+    "Nettoyage": [
+        "GARDIENNAGE ET MENAGE", "NETTOYAGE FIN DE CHANTIER", "DERATISATIONS / DESINSECTISATION"
+    ],
+    "Des employés": [
+        "APPOINTEMENTS ET SALAIRES", "INDEMNITES ET AVANTAGES DIVERS", "COTISATIONS DE SECURITE SOCIALE",
+        "COTISATIONS PREVOYANCE + SANTE", "PROVISION DES CP+CHARGES INITIAL", "PROVISION DES CP+CHARGES FINAL",
+        "ASSURANCES ACCIDENTS DU TRAVAIL", "GRATIFICATIONS DE STAGE"
+    ],
+    "Entraînement": [
+        "COURS COLLECTIFS", "ABONT FP CLOUD FITNESS PARK France", "ABONT QR CODE FITNESS PARK France",
+        "ABONT MG INSTORE MEDIA (1an)", "ABONT TSHOKO (1an)", "ABONT COMBO (1an)", "ABONT CENAREO (1an)",
+        "RESAMANIA HEBERGEMENT SERVEUR", "RESAMANIA SMS", "ABONT HYROX 365", "MAINTENANCE HYDROMASSAGE",
+        "ABONT LICENCE PLANET FITNESS"
+    ],
+    "Commercialisation": [
+        "AFFICHES pub", "LOCATION ESPACE PUBLICITAIRES", "FRAIS INAUGURATION / ANNIVERSAIRE", "CLIENT MYSTERE"
+    ],
+    "Téléphones/Communication": [
+        "FRAIS DE TELECOMMUNICATION (orange)", "FRAIS DE TELECOMMUNICATION (Maroc Télécom)"
+    ],
+    "Autres": [
+        "SOUS TRAITANCE CENTRE D APPEL", "LOYER URBAN DEVELOPPEURS V", "LOYER URBAN DEVELOPPEURS - CHARGES LOCATIVES",
+        "REDEVANCES DE CREDIT BAIL MATERIEL PS FITNESS", "LOYER MATERIEL VIA FPK MAROC",
+        "LOCATION DISTRIBUTEUR KIT STORE", "ENTRET ET REPAR DES BIENS IMMOBILIERS", "MAINTENANCE IMAFLUIDE",
+        "MAINTENANCE INCENDIE (par semestre)", "MAINTENANCE TECHNOGYM", "ASSURANCE RC CLUB SPORTIF (500 adhérents)",
+        "ASSURANCE RC CLUB SPORTIF provision actif réel", "ASSURANCE MULTIRISQUE", "REDEVANCES FITNESS PARK France 3%",
+        "VOYAGES ET DEPLACEMENTS", "RECEPTIONS", "FRAIS POSTAUX dhl", "FRAIS ET COMMISSIONS SUR SERVICES BANCAI",
+        "FRAIS COMMISSION NAPS", "FRAIS COMMISSIONS CMI", "TAXES ECRAN DEVANTURE (1an)",
+        "DROITS D'ENREGISTREMENT ET DE TIMBRE", "CADEAUX SALARIE ET CLIENT", "CHEQUES CADEAUX POUR CHALLENGES"
+    ]
 }
 special_line = "INTERETS DES EMPRUNTS ET DETTES"
 
@@ -16,8 +56,20 @@ def get_segment(nom):
         return "INTERETS DES EMPRUNTS ET DETTES"
     return "Autres"
 
+def make_unique(seq):
+    counter = Counter()
+    res = []
+    for s in seq:
+        if s in counter:
+            counter[s] += 1
+            res.append(f"{s}_{counter[s]}")
+        else:
+            counter[s] = 0
+            res.append(s)
+    return res
+
 st.set_page_config(page_title="Analyse Charges EBITDA", layout="wide")
-st.title("Analyse des Charges - Import CSV à entêtes fusionnées (dates fin de mois + Débit/Crédit)")
+st.title("Analyse des Charges - Fichier à en-têtes fusionnées (dates fin de mois + Débit/Crédit)")
 
 uploaded_file = st.file_uploader("Importe ton CSV (ou Excel)", type=["csv", "xlsx"])
 
@@ -36,7 +88,7 @@ if uploaded_file is not None:
             # Détection séparateur sur la 6ème ligne réelle (index 5)
             sep_candidates = [';', ',', '\t', '|']
             sep = max(sep_candidates, key=lambda c: lines[5].count(c))
-            # Nettoyage : récupérer lignes 4 et 5 pour les headers
+            # Header lignes 4 et 5
             header_date = lines[3].split(sep)
             header_type = lines[4].split(sep)
             new_columns = []
@@ -50,14 +102,20 @@ if uploaded_file is not None:
                 else:
                     col = ''
                 new_columns.append(col)
+            # PATCH : rendre chaque colonne unique
+            new_columns = make_unique(new_columns)
+            # Supprime les colonnes "Cumul", "Prévisionnel", "Intitulé" secondaires
+            ignore_cols = [col for col in new_columns if "Cumul" in col or "Prévisionnel" in col or (col == "Intitulé" and new_columns.count("Intitulé") > 1)]
+            cols_to_use = [col for col in new_columns if col not in ignore_cols]
             # Lecture du dataframe : données réelles à partir de ligne 6 (index 5)
             data_lines = lines[5:]
             s_data = "\n".join(data_lines)
             file_buffer = io.StringIO(s_data)
             df = pd.read_csv(file_buffer, sep=sep, header=None)
             df.columns = new_columns
+            df = df[cols_to_use]
         else:
-            # Excel direct : pandas gère mieux les colonnes fusionnées
+            # Excel direct
             xls = pd.ExcelFile(uploaded_file)
             pre_header = pd.read_excel(xls, header=None, nrows=6)
             date_row = pre_header.iloc[3].fillna('')
@@ -73,9 +131,13 @@ if uploaded_file is not None:
                 else:
                     col = ''
                 new_columns.append(col)
+            new_columns = make_unique(new_columns)
+            ignore_cols = [col for col in new_columns if "Cumul" in col or "Prévisionnel" in col or (col == "Intitulé" and new_columns.count("Intitulé") > 1)]
+            cols_to_use = [col for col in new_columns if col not in ignore_cols]
             df = pd.read_excel(xls, header=None, skiprows=5)
             df.columns = new_columns
-        # Enlève colonnes vides
+            df = df[cols_to_use]
+
         df = df.loc[:, df.columns.notna() & (df.columns != '')]
 
         st.subheader("Aperçu fichier importé (colonnes reconstituées)")
@@ -94,7 +156,6 @@ if uploaded_file is not None:
                 agg = df.groupby("SEGMENT")[[debit_col, credit_col]].sum(numeric_only=True)
                 st.subheader(f"Charges par segment - {mois}")
                 st.dataframe(agg, use_container_width=True)
-                # Graphe
                 fig, ax = plt.subplots()
                 agg[debit_col].plot(kind="bar", label="Débit", alpha=0.7, ax=ax)
                 agg[credit_col].plot(kind="bar", label="Crédit", alpha=0.7, color="orange", ax=ax)
@@ -105,12 +166,11 @@ if uploaded_file is not None:
                 plt.tight_layout()
                 st.pyplot(fig)
 
-        # Cas particulier :
+        # Cas particulier INTERETS
         if "INTERETS DES EMPRUNTS ET DETTES" in df["SEGMENT"].values:
             st.subheader("INTERETS DES EMPRUNTS ET DETTES :")
             st.dataframe(df[df["SEGMENT"] == "INTERETS DES EMPRUNTS ET DETTES"], use_container_width=True)
 
-        # Export CSV
         if mois_selection:
             export_cols = [c for c in debit_cols + credit_cols if any(m == c.split()[0] for m in mois_selection)]
             export = df.groupby("SEGMENT")[export_cols].sum()

@@ -60,6 +60,7 @@ mapping = {
     ]
 }
 SEGMENTS_ORDER = list(mapping.keys())
+mapping = {str(k).strip(): [str(x).strip() for x in v] for k, v in mapping.items()}
 
 def get_segment(nom):
     for seg, lignes in mapping.items():
@@ -105,7 +106,6 @@ uploaded_file = st.file_uploader("🗂️ Importer le fichier Balance", type=["c
 
 if uploaded_file is not None:
     try:
-        # -- DATA LOADING --
         if uploaded_file.name.endswith('.csv'):
             content = uploaded_file.read()
             encodings = ['utf-8', 'ISO-8859-1', 'latin1']
@@ -203,10 +203,13 @@ if uploaded_file is not None:
         graph_df = graph_df.fillna(0)
         indices = range(len(mois_names))
 
-        # Tous les segments du mapping, toujours visibles dans le filtre
-        segments_available = list(SEGMENTS_ORDER)
+        # PATCH: forçage str, suppression quotes/espaces chelous
+        segments_available = [str(seg).replace("'", "").replace('"', "").strip() for seg in SEGMENTS_ORDER]
         segments_with_data = [seg for seg in segments_available if graph_df[seg].sum() > 0]
         default_selection = segments_with_data if segments_with_data else segments_available
+
+        st.write("DEBUG segments_available:", segments_available)
+        st.write("DEBUG graph_df columns:", list(graph_df.columns))
 
         segments_selected = st.multiselect(
             "Sélectionne les segments à afficher",

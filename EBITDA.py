@@ -203,16 +203,18 @@ if uploaded_file is not None:
 
         # -- GRAPHIQUE BARRES GROUPEES avec filtre live --
         st.markdown("### 🔎 Filtrer les segments affichés sur le graphique")
-        # Nettoyage multiselect segments
         segments_available = [str(seg).replace("’", "").replace("'", "").replace('"', "").strip() for seg in SEGMENTS_ORDER]
-        graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_names]
-        graph_df.columns = mois_names
-        indices = range(len(mois_names))
+        # PATCH: ne garde QUE les mois réellement présents dans la data!
+        cols_reel = [c for c in mois_names if c in agg_annee.columns]
+        if len(cols_reel) < len(mois_names):
+            st.warning(f"Colonnes mois absentes ou différentes dans la data: {set(mois_names) - set(cols_reel)}")
+        graph_df = agg_annee.loc[SEGMENTS_ORDER, cols_reel]
+        graph_df.columns = cols_reel
+        indices = range(len(cols_reel))
 
-        # DEBUG visuel !
         st.write("mois_names:", mois_names)
         st.write("agg_annee.columns:", list(agg_annee.columns))
-        st.write("graph_df.columns:", list(graph_df.columns))
+        st.write("cols_reel utilisés:", cols_reel)
         st.write("graph_df preview:", graph_df.head())
 
         segments_with_data = [seg for seg in segments_available if graph_df.loc[seg].sum() > 0]
@@ -225,7 +227,7 @@ if uploaded_file is not None:
         )
 
         st.markdown("### 📈 Barres groupées : variation de chaque segment par mois")
-        fig, ax = plt.subplots(figsize=(min(14, 2 + 0.9*len(mois_names)), 7))
+        fig, ax = plt.subplots(figsize=(min(14, 2 + 0.9*len(cols_reel)), 7))
         if segments_selected:
             has_data = False
             bar_width = 0.8 / len(segments_selected)
@@ -236,9 +238,9 @@ if uploaded_file is not None:
                         has_data = True
                     ax.bar([x + i*bar_width for x in indices], bar_vals, bar_width, label=seg)
                 else:
-                    ax.bar([x + i*bar_width for x in indices], [0]*len(mois_names), bar_width, label=seg)
+                    ax.bar([x + i*bar_width for x in indices], [0]*len(cols_reel), bar_width, label=seg)
             ax.set_xticks([x + bar_width*len(segments_selected)/2 for x in indices])
-            ax.set_xticklabels(mois_names, rotation=45, ha="right")
+            ax.set_xticklabels(cols_reel, rotation=45, ha="right")
             ax.set_ylabel("Montant (MAD)")
             ax.set_xlabel("Mois")
             ax.set_title("Variation mensuelle des segments sélectionnés")
@@ -253,19 +255,19 @@ if uploaded_file is not None:
 
         # -- TABLEAU CUMUL PÉRIODE SÉLECTIONNÉE (SLIDER) --
         st.markdown("### 🧮 Cumul des segments sur la période sélectionnée")
-        if len(mois_names) > 1:
+        if len(cols_reel) > 1:
             from_month, to_month = st.select_slider(
                 "Sélectionne la période à cumuler (de ... à ...)",
-                options=mois_names,
-                value=(mois_names[0], mois_names[-1])
+                options=cols_reel,
+                value=(cols_reel[0], cols_reel[-1])
             )
-            idx_start = mois_names.index(from_month)
-            idx_end = mois_names.index(to_month)
+            idx_start = cols_reel.index(from_month)
+            idx_end = cols_reel.index(to_month)
             if idx_start > idx_end:
                 idx_start, idx_end = idx_end, idx_start
-            selected_months = mois_names[idx_start:idx_end+1]
+            selected_months = cols_reel[idx_start:idx_end+1]
         else:
-            selected_months = mois_names
+            selected_months = cols_reel
 
         cumul_df = agg_annee[selected_months].sum(axis=1)
         cumul_table = pd.DataFrame({"CUMUL SELECTIONNÉ": cumul_df})

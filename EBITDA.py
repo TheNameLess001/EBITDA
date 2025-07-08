@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import io
+import re
 from collections import Counter
 
 mapping = {
@@ -77,12 +78,19 @@ def make_unique(seq):
             res.append(s)
     return res
 
+def detect_mois_cols(header_dates):
+    # Repère les colonnes dont la ligne 4 est une date jj/mm/aaaa ou jj-mm-aaaa
+    mois_cols = []
+    for idx, val in enumerate(header_dates):
+        if re.match(r'\d{2}[/-]\d{2}[/-]\d{4}', str(val).strip()):
+            mois_cols.append(idx)
+    return mois_cols
+
 st.set_page_config(layout="wide")
 uploaded_file = st.file_uploader("Fichier", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # Read file
         if uploaded_file.name.endswith('.csv'):
             content = uploaded_file.read()
             encodings = ['utf-8', 'ISO-8859-1', 'latin1']
@@ -94,24 +102,25 @@ if uploaded_file is not None:
                     continue
             lines = s.splitlines()
             sep_candidates = [';', ',', '\t', '|']
-            # Supposons que la ligne 4 est toujours le header principal (modifiable si besoin !)
             sep = max(sep_candidates, key=lambda c: lines[3].count(c))
-            header_row = lines[3].split(sep)
-            header_row = [str(x).strip() for x in header_row]
-            header_row = make_unique(header_row)
+            header_dates = lines[3].split(sep)  # ligne 4 = index 3
+            header_dates = [str(x).strip() for x in header_dates]
+            header_dates = make_unique(header_dates)
+            header_labels = lines[4].split(sep)  # ligne 5 = index 4
             data_lines = lines[5:]
             s_data = "\n".join(data_lines)
             file_buffer = io.StringIO(s_data)
             df = pd.read_csv(file_buffer, sep=sep, header=None)
-            df.columns = header_row
+            df.columns = header_dates
         else:
             xls = pd.ExcelFile(uploaded_file)
-            header_row = pd.read_excel(xls, header=None, nrows=4).iloc[3].astype(str).str.strip().tolist()
-            header_row = make_unique(header_row)
+            header_dates = pd.read_excel(xls, header=None, nrows=4).iloc[3].astype(str).str.strip().tolist()
+            header_dates = make_unique(header_dates)
+            header_labels = pd.read_excel(xls, header=None, nrows=5).iloc[4].astype(str).str.strip().tolist()
             df = pd.read_excel(xls, header=None, skiprows=5)
-            df.columns = header_row
+            df.columns = header_dates
 
-        # Détection automatique de la colonne d'intitulé (première colonne qui matche un nom du mapping)
+        # Détection automatique colonne d’intitulé : la première colonne qui matche une valeur du mapping
         charge_names = set()
         for lignes in mapping.values():
             charge_names.update([x.strip().upper() for x in lignes])
@@ -124,45 +133,33 @@ if uploaded_file is not None:
         if detected_intitule_col is None:
             st.error("Impossible de détecter la colonne d'intitulé charges automatiquement. Vérifie ton mapping et la structure du fichier.")
             st.stop()
-
         st.write(f"Colonne des intitulés détectée automatiquement : **{detected_intitule_col}**")
         st.dataframe(df[detected_intitule_col], use_container_width=True)
 
-        # On considère tout le reste comme colonnes analytiques (sauf "Compte" ou codes pures)
-        analyse_cols = []
-        for col in df.columns:
-            if col == detected_intitule_col:
-                continue
-            try:
-                test_numeric = pd.to_numeric(df[col], errors='coerce')
-                if test_numeric.notnull().sum() > 0 and "compte" not in col.lower():
-                    analyse_cols.append(col)
-            except:
-                pass
+        # Détecte les colonnes MOIS (via ligne 4 du header)
+        mois_idx = detect_mois_cols(header_dates)
+        mois_cols = [df.columns[idx] for idx in mois_idx]
+        st.write(f"Colonnes mois détectées via la ligne 4 : {mois_cols}")
 
-        if not analyse_cols:
-            st.error("Aucune colonne numérique/mois détectée pour l'analyse.")
-            st.stop()
-
+        # Mapping segments
         df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
-        for col in analyse_cols:
+        for col in mois_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Tableau global
-        agg = df.groupby("SEGMENT")[analyse_cols].sum(numeric_only=True)
+        # Tableau global multi-mois
+        agg = df.groupby("SEGMENT")[mois_cols].sum(numeric_only=True)
+        st.subheader("Tableau global – Tous mois, tous segments")
         st.dataframe(agg, use_container_width=True)
 
-        # Un tableau par segment
-        for seg in agg.index:
-            st.subheader(seg)
-            st.dataframe(agg.loc[[seg]], use_container_width=True)
-
-        # Un graph par mois
-        for col in analyse_cols:
-            vals = agg[col].sort_values(ascending=False)
+        # Vue par mois (tableau + graphique)
+        for col in mois_cols:
+            agg_mois = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
+            st.subheader(f"Vue par segment – Mois {col}")
+            st.dataframe(agg_mois, use_container_width=True)
+            vals = agg_mois[col].sort_values(ascending=False)
             fig, ax = plt.subplots()
             bars = ax.bar(vals.index, vals.values)
-            ax.set_title(col)
+            ax.set_title(f"Comparatif segments – {col}")
             plt.xticks(rotation=45, ha="right")
             plt.tight_layout()
             st.pyplot(fig)

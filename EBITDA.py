@@ -6,19 +6,60 @@ import re
 import calendar
 from collections import Counter
 
+# ----------- MAPPING -----------
 mapping = {
-    # ... [garde ton mapping complet ici, inchangé] ...
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
         "STOCK INITIAL", "STOCK FINAL", "ACHATS LYDEC (EAU+ELECTRICITE)", "ACHATS DE PETITS EQUIPEMENTS FOURNITURES",
         "ACHAT TENUES", "ACHATS DE FOURNITURES DE BUREAU"
     ],
-    # ... etc ...
+    "SERVICES RH / PRESTATIONS": [
+        "CONVENTION MEDECIN (1an)", "ACHATS PRESTATION admin / RH", "SOUS TRAITANCE CENTRE D APPEL",
+        "GARDIENNAGE ET MENAGE", "NETTOYAGE FIN DE CHANTIER", "DERATISATIONS / DESINSECTISATION"
+    ],
+    "COURS & ABONNEMENTS": [
+        "COURS COLLECTIFS", "ABONT FP CLOUD FITNESS PARK France", "ABONT QR CODE FITNESS PARK France",
+        "ABONT MG INSTORE MEDIA (1an)", "ABONT TSHOKO (1an)", "ABONT COMBO (1an)", "ABONT CENAREO (1an)",
+        "RESAMANIA HEBERGEMENT SERVEUR", "RESAMANIA SMS", "ABONT HYROX 365", "MAINTENANCE HYDROMASSAGE",
+        "ABONT LICENCE PLANET FITNESS"
+    ],
+    "LOYERS / LOCATIONS / REDEVANCES": [
+        "LOYER URBAN DEVELOPPEURS V", "LOYER URBAN DEVELOPPEURS - CHARGES LOCATIVES",
+        "REDEVANCES DE CREDIT BAIL MATERIEL PS FITNESS", "LOYER MATERIEL VIA FPK MAROC",
+        "LOCATION DISTRIBUTEUR KIT STORE", "LOCATION ESPACE PUBLICITAIRES"
+    ],
+    "MAINTENANCE / ASSURANCES": [
+        "ENTRET ET REPAR DES BIENS IMMOBILIERS", "MAINTENANCE IMAFLUIDE", "MAINTENANCE INCENDIE (par semestre)",
+        "MAINTENANCE TECHNOGYM", "ASSURANCE RC CLUB SPORTIF (500 adhérents)",
+        "ASSURANCE RC CLUB SPORTIF provision actif réel", "ASSURANCE MULTIRISQUE",
+        "ASSURANCES ACCIDENTS DU TRAVAIL"
+    ],
+    "HONORAIRES / DIVERS": [
+        "HONORAIRES COMPTA (moore)", "HONORAIRES SOCIAL (moore)", "HONORAIRES DIVERS", "HONO PRESTATION FPK MAROC"
+    ],
+    "REDEVANCES / FP FRANCE": [
+        "REDEVANCES FITNESS PARK France 3%"
+    ],
+    "FRAIS / COMMUNICATION / MARKETING": [
+        "VOYAGES ET DEPLACEMENTS", "RECEPTIONS", "FRAIS POSTAUX dhl", "FRAIS INAUGURATION / ANNIVERSAIRE",
+        "FRAIS DE TELECOMMUNICATION (orange)", "FRAIS DE TELECOMMUNICATION (Maroc Télécom)", "CLIENT MYSTERE",
+        "AFFICHES pub", "FRAIS ET COMMISSIONS SUR SERVICES BANCAI", "FRAIS COMMISSION NAPS",
+        "FRAIS COMMISSIONS CMI", "TAXES ECRAN DEVANTURE (1an)", "DROITS D'ENREGISTREMENT ET DE TIMBRE"
+    ],
+    "PERSONNEL / CHARGES SOCIALES": [
+        "APPOINTEMENTS ET SALAIRES", "INDEMNITES ET AVANTAGES DIVERS", "COTISATIONS DE SECURITE SOCIALE",
+        "COTISATIONS PREVOYANCE + SANTE", "PROVISION DES CP+CHARGES INITIAL", "PROVISION DES CP+CHARGES FINAL",
+        "GRATIFICATIONS DE STAGE"
+    ],
+    "CADEAUX / CHALLENGES": [
+        "CADEAUX SALARIE ET CLIENT", "CHEQUES CADEAUX POUR CHALLENGES"
+    ],
     "INTERETS / FINANCE": [
         "INTERETS DES EMPRUNTS ET DETTES"
     ]
 }
 special_line = "INTERETS DES EMPRUNTS ET DETTES"
+SEGMENTS_ORDER = list(mapping.keys()) + ["Autres"]
 
 def get_segment(nom):
     for seg, lignes in mapping.items():
@@ -50,7 +91,6 @@ def mad_format(x):
         return ""
 
 def extract_month_name(header):
-    """Convertit 'Solde au 31/01/2025' → 'Janvier 2025'."""
     m = re.search(r'Solde au (\d{2})[/-](\d{2})[/-](\d{4})', header)
     if m:
         month = int(m.group(2))
@@ -107,7 +147,7 @@ if uploaded_file is not None:
             st.error("Impossible de détecter la colonne d'intitulé charges automatiquement. Vérifie ton mapping et la structure du fichier.")
             st.stop()
 
-        # Trouver les index des colonnes "Solde au ..."/Débit
+        # Colonnes "Solde au ..."/Débit
         mois_cols = []
         mois_headers = []
         for idx, (h4, h5) in enumerate(zip(header4, header5)):
@@ -126,11 +166,14 @@ if uploaded_file is not None:
             )
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Affectation segment complet (les "Autres" seront visibles, rien n’est perdu)
+        # Affecte le segment à chaque ligne
         df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
 
-        # Tableau global annuel (total année par segment)
-        agg_annee = df.groupby("SEGMENT")[mois_cols].sum(numeric_only=True)
+        # S'assure que tous les segments sont présents (même à 0)
+        df["SEGMENT"] = pd.Categorical(df["SEGMENT"], categories=SEGMENTS_ORDER, ordered=True)
+        # Tableau global annuel
+        agg_annee = df.groupby("SEGMENT", observed=False)[mois_cols].sum(numeric_only=True)
+        agg_annee = agg_annee.reindex(SEGMENTS_ORDER).fillna(0)
         agg_annee["Total Année"] = agg_annee[mois_cols].sum(axis=1)
         display_agg_annee = agg_annee.copy()
         display_agg_annee.columns = [*mois_names, "Total Année"]
@@ -138,12 +181,21 @@ if uploaded_file is not None:
         st.subheader("Tableau annuel (somme de tous les mois) par segment")
         st.dataframe(display_agg_annee, use_container_width=True)
 
+        # Affiche les lignes qui composent "Autres"
+        autres_lignes = df[df["SEGMENT"] == "Autres"][detected_intitule_col].dropna().unique().tolist()
+        with st.expander("Voir le détail du segment 'Autres' (intitulés non mappés)", expanded=False):
+            if autres_lignes:
+                st.write(", ".join(autres_lignes))
+            else:
+                st.write("Aucune ligne hors mapping !")
+
         # Scroll horizontal sur les mois (vue détaillée)
         st.subheader("Tableaux par mois (scroll horizontal possible)")
         tabs = st.tabs(mois_names)
         for i, col in enumerate(mois_cols):
             with tabs[i]:
-                agg_mois = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
+                agg_mois = df.groupby("SEGMENT", observed=False)[[col]].sum(numeric_only=True)
+                agg_mois = agg_mois.reindex(SEGMENTS_ORDER).fillna(0)
                 agg_mois.columns = [mois_names[i]]
                 agg_mois[mois_names[i]] = agg_mois[mois_names[i]].apply(mad_format)
                 st.dataframe(agg_mois, use_container_width=True)

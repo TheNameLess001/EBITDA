@@ -3,16 +3,17 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import io
 import re
+import calendar
 from collections import Counter
 
 mapping = {
-    # ... [ton mapping ci-dessus inchangé] ...
+    # ... [garde ton mapping complet ici, inchangé] ...
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
         "STOCK INITIAL", "STOCK FINAL", "ACHATS LYDEC (EAU+ELECTRICITE)", "ACHATS DE PETITS EQUIPEMENTS FOURNITURES",
         "ACHAT TENUES", "ACHATS DE FOURNITURES DE BUREAU"
     ],
-    # ... les autres groupes ...
+    # ... etc ...
     "INTERETS / FINANCE": [
         "INTERETS DES EMPRUNTS ET DETTES"
     ]
@@ -44,9 +45,18 @@ def mad_format(x):
         x = float(x)
         if pd.isna(x):
             return ""
-        return "{:,.0f} MAD".format(x).replace(",", " ")
+        return "{:,.0f} MAD".replace(",", " ").format(x)
     except:
         return ""
+
+def extract_month_name(header):
+    """Convertit 'Solde au 31/01/2025' → 'Janvier 2025'."""
+    m = re.search(r'Solde au (\d{2})[/-](\d{2})[/-](\d{4})', header)
+    if m:
+        month = int(m.group(2))
+        year = m.group(3)
+        return f"{calendar.month_name[month]} {year}"
+    return header
 
 st.set_page_config(layout="wide")
 uploaded_file = st.file_uploader("Fichier", type=["csv", "xlsx"])
@@ -99,11 +109,13 @@ if uploaded_file is not None:
 
         # Trouver les index des colonnes "Solde au ..."/Débit
         mois_cols = []
-        mois_names = []
+        mois_headers = []
         for idx, (h4, h5) in enumerate(zip(header4, header5)):
             if h4.startswith("Solde au") and h5 == "Débit":
                 mois_cols.append(df.columns[idx])
-                mois_names.append(h4)
+                mois_headers.append(h4)
+        mois_names = [extract_month_name(h) for h in mois_headers]
+
         # Nettoyage & conversion montants français/espaces
         for col in mois_cols:
             df[col] = (
@@ -114,12 +126,14 @@ if uploaded_file is not None:
             )
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # Affectation segment complet (les "Autres" seront visibles, rien n’est perdu)
         df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
 
-        # Calcul tableau global annuel (total année par segment)
+        # Tableau global annuel (total année par segment)
         agg_annee = df.groupby("SEGMENT")[mois_cols].sum(numeric_only=True)
         agg_annee["Total Année"] = agg_annee[mois_cols].sum(axis=1)
         display_agg_annee = agg_annee.copy()
+        display_agg_annee.columns = [*mois_names, "Total Année"]
         display_agg_annee = display_agg_annee.applymap(mad_format)
         st.subheader("Tableau annuel (somme de tous les mois) par segment")
         st.dataframe(display_agg_annee, use_container_width=True)
@@ -134,7 +148,7 @@ if uploaded_file is not None:
                 agg_mois[mois_names[i]] = agg_mois[mois_names[i]].apply(mad_format)
                 st.dataframe(agg_mois, use_container_width=True)
 
-        # Graph comparatif live
+        # Graph comparatif live avec noms de mois lisibles
         st.subheader("Graphique comparatif : Choisis 2 à 12 mois à comparer")
         mois_selection = st.multiselect(
             "Sélectionne les mois à comparer (2 à 12 max)",
@@ -142,9 +156,13 @@ if uploaded_file is not None:
             default=mois_names[:2],
             max_selections=12
         )
+        # Mapping noms vers cols pour selection
+        name_to_col = dict(zip(mois_names, mois_cols))
         if len(mois_selection) >= 2:
             fig, ax = plt.subplots(figsize=(max(8, 1.6*len(mois_selection)), 5))
-            to_plot = agg_annee.loc[:, mois_selection]
+            cols_to_plot = [name_to_col[m] for m in mois_selection]
+            to_plot = agg_annee.loc[:, cols_to_plot]
+            to_plot.columns = mois_selection
             to_plot = to_plot.fillna(0)
             to_plot.T.plot(kind="bar", ax=ax)
             plt.ylabel("Montant (MAD)")

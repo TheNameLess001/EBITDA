@@ -173,7 +173,7 @@ if uploaded_file is not None:
         # -- AFFECTATION DES SEGMENTS --
         df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
         df["SEGMENT"] = pd.Categorical(df["SEGMENT"], categories=SEGMENTS_ORDER, ordered=True)
-        df = df[df["SEGMENT"].notnull()]  # on garde seulement les lignes du mapping
+        df = df[df["SEGMENT"].notnull()]
 
         # -- TABLEAU GLOBAL (ANNUEL) --
         st.markdown("### 📊 Tableau annuel (somme de tous les mois) par segment")
@@ -201,21 +201,25 @@ if uploaded_file is not None:
         graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_cols]
         graph_df.columns = mois_names
         graph_df = graph_df.fillna(0)
-        segments_available = [seg for seg in SEGMENTS_ORDER]
-        segments_with_data = [seg for seg in SEGMENTS_ORDER if graph_df[seg].sum() > 0]
+        indices = range(len(mois_names))
+
+        # Tous les segments du mapping, toujours visibles dans le filtre
+        segments_available = list(SEGMENTS_ORDER)
+        segments_with_data = [seg for seg in segments_available if graph_df[seg].sum() > 0]
+        default_selection = segments_with_data if segments_with_data else segments_available
+
         segments_selected = st.multiselect(
-        "Sélectionne les segments à afficher",
-        options=segments_available,
-        default=segments_with_data if segments_with_data else segments_available
+            "Sélectionne les segments à afficher",
+            options=segments_available,
+            default=default_selection
         )
 
         st.markdown("### 📈 Barres groupées : variation de chaque segment par mois")
         fig, ax = plt.subplots(figsize=(min(14, 2 + 0.9*len(mois_names)), 7))
-        indices = range(len(mois_names))
         if segments_selected:
             bar_width = 0.8 / len(segments_selected)
             for i, seg in enumerate(segments_selected):
-                bar_vals = graph_df.loc[:, seg].values if seg in graph_df else [0]*len(mois_names)
+                bar_vals = graph_df[seg].values if seg in graph_df else [0]*len(mois_names)
                 ax.bar([x + i*bar_width for x in indices], bar_vals, bar_width, label=seg)
             ax.set_xticks([x + bar_width*len(segments_selected)/2 for x in indices])
             ax.set_xticklabels(mois_names, rotation=45, ha="right")

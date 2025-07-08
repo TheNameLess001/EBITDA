@@ -201,12 +201,14 @@ if uploaded_file is not None:
         graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_cols]
         graph_df.columns = mois_names
         graph_df = graph_df.fillna(0)
-        default_segments = [seg for seg in SEGMENTS_ORDER if graph_df[seg].sum() > 0]
+        segments_available = [seg for seg in SEGMENTS_ORDER]
+        segments_with_data = [seg for seg in SEGMENTS_ORDER if graph_df[seg].sum() > 0]
         segments_selected = st.multiselect(
-            "Sélectionne les segments à afficher",
-            options=SEGMENTS_ORDER,
-            default=default_segments if default_segments else SEGMENTS_ORDER
+        "Sélectionne les segments à afficher",
+        options=segments_available,
+        default=segments_with_data if segments_with_data else segments_available
         )
+
         st.markdown("### 📈 Barres groupées : variation de chaque segment par mois")
         fig, ax = plt.subplots(figsize=(min(14, 2 + 0.9*len(mois_names)), 7))
         indices = range(len(mois_names))

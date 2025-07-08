@@ -5,7 +5,9 @@ import io
 import re
 import calendar
 from collections import Counter
+import numpy as np
 
+# ----- MAPPING -----
 mapping = {
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
@@ -157,13 +159,14 @@ if uploaded_file is not None:
                 mois_headers.append(h4)
         mois_names = [extract_month_name(h) for h in mois_headers]
 
-        # -- FORMAT MONTANTS --
+        # -- FORMAT MONTANTS ULTIME --
         for col in mois_cols:
             df[col] = (
-                df[col].astype(str)
+                df[col]
+                .astype(str)
+                .str.replace(r"[\s\u202f\t\r\n]", "", regex=True)
                 .str.replace(",", ".", regex=False)
-                .str.replace(" ", "", regex=False)
-                .str.replace("\u202f", "", regex=False)
+                .replace({"None": np.nan, "nan": np.nan, "": np.nan})
             )
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
@@ -193,54 +196,56 @@ if uploaded_file is not None:
                 agg_mois[mois_names[i]] = agg_mois[mois_names[i]].apply(mad_format)
                 st.dataframe(agg_mois, use_container_width=True)
 
-        # -- GRAPHIQUE BARRES GROUPEES --
-        st.markdown("### 📈 Variation mensuelle de chaque segment (barres groupées)")
+        # -- GRAPHIQUE BARRES GROUPEES avec filtre live --
+        st.markdown("### 🔎 Filtrer les segments affichés sur le graphique")
         graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_cols]
         graph_df.columns = mois_names
         graph_df = graph_df.fillna(0)
+        default_segments = [seg for seg in SEGMENTS_ORDER if graph_df[seg].sum() > 0]
+        segments_selected = st.multiselect(
+            "Sélectionne les segments à afficher",
+            options=SEGMENTS_ORDER,
+            default=default_segments if default_segments else SEGMENTS_ORDER
+        )
+        st.markdown("### 📈 Barres groupées : variation de chaque segment par mois")
         fig, ax = plt.subplots(figsize=(min(14, 2 + 0.9*len(mois_names)), 7))
-        bar_width = 0.8 / len(SEGMENTS_ORDER)
         indices = range(len(mois_names))
-        for i, seg in enumerate(SEGMENTS_ORDER):
-            bar_vals = graph_df.loc[:, seg].values if seg in graph_df else [0]*len(mois_names)
-            ax.bar([x + i*bar_width for x in indices], bar_vals, bar_width, label=seg)
-        ax.set_xticks([x + bar_width*len(SEGMENTS_ORDER)/2 for x in indices])
-        ax.set_xticklabels(mois_names, rotation=45, ha="right")
-        ax.set_ylabel("Montant (MAD)")
-        ax.set_xlabel("Mois")
-        ax.set_title("Variation mensuelle des segments (barres groupées)")
-        ax.legend(loc="upper left", bbox_to_anchor=(1,1))
-        plt.tight_layout()
-        st.pyplot(fig)
+        if segments_selected:
+            bar_width = 0.8 / len(segments_selected)
+            for i, seg in enumerate(segments_selected):
+                bar_vals = graph_df.loc[:, seg].values if seg in graph_df else [0]*len(mois_names)
+                ax.bar([x + i*bar_width for x in indices], bar_vals, bar_width, label=seg)
+            ax.set_xticks([x + bar_width*len(segments_selected)/2 for x in indices])
+            ax.set_xticklabels(mois_names, rotation=45, ha="right")
+            ax.set_ylabel("Montant (MAD)")
+            ax.set_xlabel("Mois")
+            ax.set_title("Variation mensuelle des segments sélectionnés")
+            ax.legend(loc="upper left", bbox_to_anchor=(1,1))
+            plt.tight_layout()
+            st.pyplot(fig)
+        else:
+            st.warning("Sélectionne au moins un segment pour afficher le graphique.")
+
+        # -- TABLEAU CUMUL PÉRIODE SÉLECTIONNÉE (SLIDER) --
+        st.markdown("### 🧮 Cumul des segments sur la période sélectionnée")
+        if len(mois_names) > 1:
+            from_month, to_month = st.select_slider(
+                "Sélectionne la période à cumuler (de ... à ...)",
+                options=mois_names,
+                value=(mois_names[0], mois_names[-1])
+            )
+            idx_start = mois_names.index(from_month)
+            idx_end = mois_names.index(to_month)
+            if idx_start > idx_end:
+                idx_start, idx_end = idx_end, idx_start
+            selected_months = mois_names[idx_start:idx_end+1]
+        else:
+            selected_months = mois_names
+
+        cumul_df = agg_annee[selected_months].sum(axis=1)
+        cumul_table = pd.DataFrame({"CUMUL SELECTIONNÉ": cumul_df})
+        cumul_table = cumul_table.applymap(mad_format)
+        st.dataframe(cumul_table, use_container_width=True)
 
     except Exception as e:
         st.error(f"{e}")
-
-st.markdown("### 🧮 Cumul des segments sur la période sélectionnée")
-
-if len(mois_names) > 1:
-    from_month, to_month = st.select_slider(
-        "Sélectionne la période à cumuler (de ... à ...)",
-        options=mois_names,
-        value=(mois_names[0], mois_names[-1])
-    )
-    idx_start = mois_names.index(from_month)
-    idx_end = mois_names.index(to_month)
-    if idx_start > idx_end:
-        idx_start, idx_end = idx_end, idx_start
-    selected_months = mois_names[idx_start:idx_end+1]
-else:
-    selected_months = mois_names
-
-# On calcule le cumul sur la période sélectionnée
-cumul_df = agg_annee[selected_months].sum(axis=1)
-cumul_table = pd.DataFrame({"CUMUL SELECTIONNÉ": cumul_df})
-cumul_table = cumul_table.applymap(mad_format)
-st.dataframe(cumul_table, use_container_width=True)
-
-
-# On calcule le cumul sur la période sélectionnée
-cumul_df = agg_annee[selected_months].sum(axis=1)
-cumul_table = pd.DataFrame({"CUMUL SELECTIONNÉ": cumul_df})
-cumul_table = cumul_table.applymap(mad_format)
-st.dataframe(cumul_table, use_container_width=True)

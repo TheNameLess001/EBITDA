@@ -1,12 +1,89 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 import io
+import re
+from collections import Counter
+
+mapping = {
+    "ACHATS": [
+        "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
+        "STOCK INITIAL", "STOCK FINAL", "ACHATS LYDEC (EAU+ELECTRICITE)", "ACHATS DE PETITS EQUIPEMENTS FOURNITURES",
+        "ACHAT TENUES", "ACHATS DE FOURNITURES DE BUREAU"
+    ],
+    "SERVICES RH / PRESTATIONS": [
+        "CONVENTION MEDECIN (1an)", "ACHATS PRESTATION admin / RH", "SOUS TRAITANCE CENTRE D APPEL",
+        "GARDIENNAGE ET MENAGE", "NETTOYAGE FIN DE CHANTIER", "DERATISATIONS / DESINSECTISATION"
+    ],
+    "COURS & ABONNEMENTS": [
+        "COURS COLLECTIFS", "ABONT FP CLOUD FITNESS PARK France", "ABONT QR CODE FITNESS PARK France",
+        "ABONT MG INSTORE MEDIA (1an)", "ABONT TSHOKO (1an)", "ABONT COMBO (1an)", "ABONT CENAREO (1an)",
+        "RESAMANIA HEBERGEMENT SERVEUR", "RESAMANIA SMS", "ABONT HYROX 365", "MAINTENANCE HYDROMASSAGE",
+        "ABONT LICENCE PLANET FITNESS"
+    ],
+    "LOYERS / LOCATIONS / REDEVANCES": [
+        "LOYER URBAN DEVELOPPEURS V", "LOYER URBAN DEVELOPPEURS - CHARGES LOCATIVES",
+        "REDEVANCES DE CREDIT BAIL MATERIEL PS FITNESS", "LOYER MATERIEL VIA FPK MAROC",
+        "LOCATION DISTRIBUTEUR KIT STORE", "LOCATION ESPACE PUBLICITAIRES"
+    ],
+    "MAINTENANCE / ASSURANCES": [
+        "ENTRET ET REPAR DES BIENS IMMOBILIERS", "MAINTENANCE IMAFLUIDE", "MAINTENANCE INCENDIE (par semestre)",
+        "MAINTENANCE TECHNOGYM", "ASSURANCE RC CLUB SPORTIF (500 adhérents)",
+        "ASSURANCE RC CLUB SPORTIF provision actif réel", "ASSURANCE MULTIRISQUE",
+        "ASSURANCES ACCIDENTS DU TRAVAIL"
+    ],
+    "HONORAIRES / DIVERS": [
+        "HONORAIRES COMPTA (moore)", "HONORAIRES SOCIAL (moore)", "HONORAIRES DIVERS", "HONO PRESTATION FPK MAROC"
+    ],
+    "REDEVANCES / FP FRANCE": [
+        "REDEVANCES FITNESS PARK France 3%"
+    ],
+    "FRAIS / COMMUNICATION / MARKETING": [
+        "VOYAGES ET DEPLACEMENTS", "RECEPTIONS", "FRAIS POSTAUX dhl", "FRAIS INAUGURATION / ANNIVERSAIRE",
+        "FRAIS DE TELECOMMUNICATION (orange)", "FRAIS DE TELECOMMUNICATION (Maroc Télécom)", "CLIENT MYSTERE",
+        "AFFICHES pub", "FRAIS ET COMMISSIONS SUR SERVICES BANCAI", "FRAIS COMMISSION NAPS",
+        "FRAIS COMMISSIONS CMI", "TAXES ECRAN DEVANTURE (1an)", "DROITS D'ENREGISTREMENT ET DE TIMBRE"
+    ],
+    "PERSONNEL / CHARGES SOCIALES": [
+        "APPOINTEMENTS ET SALAIRES", "INDEMNITES ET AVANTAGES DIVERS", "COTISATIONS DE SECURITE SOCIALE",
+        "COTISATIONS PREVOYANCE + SANTE", "PROVISION DES CP+CHARGES INITIAL", "PROVISION DES CP+CHARGES FINAL",
+        "GRATIFICATIONS DE STAGE"
+    ],
+    "CADEAUX / CHALLENGES": [
+        "CADEAUX SALARIE ET CLIENT", "CHEQUES CADEAUX POUR CHALLENGES"
+    ],
+    "INTERETS / FINANCE": [
+        "INTERETS DES EMPRUNTS ET DETTES"
+    ]
+}
+special_line = "INTERETS DES EMPRUNTS ET DETTES"
+
+def get_segment(nom):
+    for seg, lignes in mapping.items():
+        if isinstance(nom, str) and nom.strip().upper() in [x.strip().upper() for x in lignes]:
+            return seg
+    if isinstance(nom, str) and nom.strip().upper() == special_line:
+        return "INTERETS DES EMPRUNTS ET DETTES"
+    return "Autres"
+
+def make_unique(seq):
+    counter = Counter()
+    res = []
+    for s in seq:
+        if s in counter:
+            counter[s] += 1
+            res.append(f"{s}_{counter[s]}")
+        else:
+            counter[s] = 0
+            res.append(s)
+    return res
 
 st.set_page_config(layout="wide")
 uploaded_file = st.file_uploader("Fichier", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
+        # --- Lecture brute des headers ---
         if uploaded_file.name.endswith('.csv'):
             content = uploaded_file.read()
             encodings = ['utf-8', 'ISO-8859-1', 'latin1']
@@ -20,14 +97,68 @@ if uploaded_file is not None:
             sep_candidates = [';', ',', '\t', '|']
             sep = max(sep_candidates, key=lambda c: lines[3].count(c))
             header4 = lines[3].split(sep)
+            header4 = [str(x).strip() for x in header4]
+            header4 = make_unique(header4)
             header5 = lines[4].split(sep)
-            st.write("Ligne 4 :", header4)
-            st.write("Ligne 5 :", header5)
+            header5 = [str(x).strip() for x in header5]
+            data_lines = lines[5:]
+            s_data = "\n".join(data_lines)
+            file_buffer = io.StringIO(s_data)
+            df = pd.read_csv(file_buffer, sep=sep, header=None)
+            df.columns = header4
         else:
             xls = pd.ExcelFile(uploaded_file)
-            header4 = pd.read_excel(xls, header=None, nrows=4).iloc[3].astype(str).tolist()
-            header5 = pd.read_excel(xls, header=None, nrows=5).iloc[4].astype(str).tolist()
-            st.write("Ligne 4 :", header4)
-            st.write("Ligne 5 :", header5)
+            header4 = pd.read_excel(xls, header=None, nrows=4).iloc[3].astype(str).str.strip().tolist()
+            header4 = make_unique(header4)
+            header5 = pd.read_excel(xls, header=None, nrows=5).iloc[4].astype(str).str.strip().tolist()
+            df = pd.read_excel(xls, header=None, skiprows=5)
+            df.columns = header4
+
+        # Détection colonne d’intitulés charges
+        mapping_vals = set()
+        for lignes in mapping.values():
+            mapping_vals.update([x.strip().upper() for x in lignes])
+        detected_intitule_col = None
+        for col in df.columns:
+            sample = df[col].astype(str).str.strip().str.upper()
+            if sample.isin(mapping_vals).any():
+                detected_intitule_col = col
+                break
+        if detected_intitule_col is None:
+            st.error("Impossible de détecter la colonne d'intitulé charges automatiquement. Vérifie ton mapping et la structure du fichier.")
+            st.stop()
+        st.write(f"Colonne des intitulés détectée : **{detected_intitule_col}**")
+        st.dataframe(df[detected_intitule_col], use_container_width=True)
+
+        # Trouver les index des colonnes "Solde au ..."/Débit
+        mois_cols = []
+        mois_names = []
+        for idx, (h4, h5) in enumerate(zip(header4, header5)):
+            if h4.startswith("Solde au") and h5 == "Débit":
+                mois_cols.append(df.columns[idx])
+                mois_names.append(h4)
+        st.write(f"Colonnes mois (Débit uniquement) : {mois_cols}")
+
+        # Mapping segment
+        df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
+        for col in mois_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        agg = df.groupby("SEGMENT")[mois_cols].sum(numeric_only=True)
+        st.subheader("Tableau global – Tous mois, tous segments")
+        st.dataframe(agg, use_container_width=True)
+
+        for i, col in enumerate(mois_cols):
+            agg_mois = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
+            st.subheader(f"Vue par segment – Mois {mois_names[i]}")
+            st.dataframe(agg_mois, use_container_width=True)
+            vals = agg_mois[col].sort_values(ascending=False)
+            fig, ax = plt.subplots()
+            bars = ax.bar(vals.index, vals.values)
+            ax.set_title(f"Comparatif segments – {mois_names[i]}")
+            plt.xticks(rotation=45, ha="right")
+            plt.tight_layout()
+            st.pyplot(fig)
+
     except Exception as e:
         st.error(f"{e}")

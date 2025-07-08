@@ -6,68 +6,27 @@ import re
 import calendar
 from collections import Counter
 
-# ----------- MAPPING -----------
 mapping = {
+    # ... Ton mapping complet ici ...
     "ACHATS": [
         "ACHATS DE MARCHANDISES revente", "ACHAT ALIZEE", "ACHAT BOGOODS", "ACHAT GRAPOS", "ACHAT HYGYENE SDHE",
         "STOCK INITIAL", "STOCK FINAL", "ACHATS LYDEC (EAU+ELECTRICITE)", "ACHATS DE PETITS EQUIPEMENTS FOURNITURES",
         "ACHAT TENUES", "ACHATS DE FOURNITURES DE BUREAU"
     ],
-    "SERVICES RH / PRESTATIONS": [
-        "CONVENTION MEDECIN (1an)", "ACHATS PRESTATION admin / RH", "SOUS TRAITANCE CENTRE D APPEL",
-        "GARDIENNAGE ET MENAGE", "NETTOYAGE FIN DE CHANTIER", "DERATISATIONS / DESINSECTISATION"
-    ],
-    "COURS & ABONNEMENTS": [
-        "COURS COLLECTIFS", "ABONT FP CLOUD FITNESS PARK France", "ABONT QR CODE FITNESS PARK France",
-        "ABONT MG INSTORE MEDIA (1an)", "ABONT TSHOKO (1an)", "ABONT COMBO (1an)", "ABONT CENAREO (1an)",
-        "RESAMANIA HEBERGEMENT SERVEUR", "RESAMANIA SMS", "ABONT HYROX 365", "MAINTENANCE HYDROMASSAGE",
-        "ABONT LICENCE PLANET FITNESS"
-    ],
-    "LOYERS / LOCATIONS / REDEVANCES": [
-        "LOYER URBAN DEVELOPPEURS V", "LOYER URBAN DEVELOPPEURS - CHARGES LOCATIVES",
-        "REDEVANCES DE CREDIT BAIL MATERIEL PS FITNESS", "LOYER MATERIEL VIA FPK MAROC",
-        "LOCATION DISTRIBUTEUR KIT STORE", "LOCATION ESPACE PUBLICITAIRES"
-    ],
-    "MAINTENANCE / ASSURANCES": [
-        "ENTRET ET REPAR DES BIENS IMMOBILIERS", "MAINTENANCE IMAFLUIDE", "MAINTENANCE INCENDIE (par semestre)",
-        "MAINTENANCE TECHNOGYM", "ASSURANCE RC CLUB SPORTIF (500 adhérents)",
-        "ASSURANCE RC CLUB SPORTIF provision actif réel", "ASSURANCE MULTIRISQUE",
-        "ASSURANCES ACCIDENTS DU TRAVAIL"
-    ],
-    "HONORAIRES / DIVERS": [
-        "HONORAIRES COMPTA (moore)", "HONORAIRES SOCIAL (moore)", "HONORAIRES DIVERS", "HONO PRESTATION FPK MAROC"
-    ],
-    "REDEVANCES / FP FRANCE": [
-        "REDEVANCES FITNESS PARK France 3%"
-    ],
-    "FRAIS / COMMUNICATION / MARKETING": [
-        "VOYAGES ET DEPLACEMENTS", "RECEPTIONS", "FRAIS POSTAUX dhl", "FRAIS INAUGURATION / ANNIVERSAIRE",
-        "FRAIS DE TELECOMMUNICATION (orange)", "FRAIS DE TELECOMMUNICATION (Maroc Télécom)", "CLIENT MYSTERE",
-        "AFFICHES pub", "FRAIS ET COMMISSIONS SUR SERVICES BANCAI", "FRAIS COMMISSION NAPS",
-        "FRAIS COMMISSIONS CMI", "TAXES ECRAN DEVANTURE (1an)", "DROITS D'ENREGISTREMENT ET DE TIMBRE"
-    ],
-    "PERSONNEL / CHARGES SOCIALES": [
-        "APPOINTEMENTS ET SALAIRES", "INDEMNITES ET AVANTAGES DIVERS", "COTISATIONS DE SECURITE SOCIALE",
-        "COTISATIONS PREVOYANCE + SANTE", "PROVISION DES CP+CHARGES INITIAL", "PROVISION DES CP+CHARGES FINAL",
-        "GRATIFICATIONS DE STAGE"
-    ],
-    "CADEAUX / CHALLENGES": [
-        "CADEAUX SALARIE ET CLIENT", "CHEQUES CADEAUX POUR CHALLENGES"
-    ],
+    # ... les autres groupes ...
     "INTERETS / FINANCE": [
         "INTERETS DES EMPRUNTS ET DETTES"
     ]
 }
-special_line = "INTERETS DES EMPRUNTS ET DETTES"
-SEGMENTS_ORDER = list(mapping.keys()) + ["Autres"]
+SEGMENTS_ORDER = list(mapping.keys())  # Pas de "Autres" !
 
 def get_segment(nom):
     for seg, lignes in mapping.items():
         if isinstance(nom, str) and nom.strip().upper() in [x.strip().upper() for x in lignes]:
             return seg
-    if isinstance(nom, str) and nom.strip().upper() == special_line:
-        return "INTERETS DES EMPRUNTS ET DETTES"
-    return "Autres"
+    if isinstance(nom, str) and nom.strip().upper() == "INTERETS DES EMPRUNTS ET DETTES":
+        return "INTERETS / FINANCE"
+    return None  # <- Important : tout ce qui n'est pas mappé = None
 
 def make_unique(seq):
     counter = Counter()
@@ -169,8 +128,10 @@ if uploaded_file is not None:
         # Affecte le segment à chaque ligne
         df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
 
-        # S'assure que tous les segments sont présents (même à 0)
+        # Filtrer pour ne garder QUE les lignes avec un segment connu (donc plus de "Autres" ni None)
+        df = df[df["SEGMENT"].notnull()]
         df["SEGMENT"] = pd.Categorical(df["SEGMENT"], categories=SEGMENTS_ORDER, ordered=True)
+
         # Tableau global annuel
         agg_annee = df.groupby("SEGMENT", observed=False)[mois_cols].sum(numeric_only=True)
         agg_annee = agg_annee.reindex(SEGMENTS_ORDER).fillna(0)
@@ -180,14 +141,6 @@ if uploaded_file is not None:
         display_agg_annee = display_agg_annee.applymap(mad_format)
         st.subheader("Tableau annuel (somme de tous les mois) par segment")
         st.dataframe(display_agg_annee, use_container_width=True)
-
-        # Affiche les lignes qui composent "Autres"
-        autres_lignes = df[df["SEGMENT"] == "Autres"][detected_intitule_col].dropna().unique().tolist()
-        with st.expander("Voir le détail du segment 'Autres' (intitulés non mappés)", expanded=False):
-            if autres_lignes:
-                st.write(", ".join(autres_lignes))
-            else:
-                st.write("Aucune ligne hors mapping !")
 
         # Scroll horizontal sur les mois (vue détaillée)
         st.subheader("Tableaux par mois (scroll horizontal possible)")
@@ -200,30 +153,23 @@ if uploaded_file is not None:
                 agg_mois[mois_names[i]] = agg_mois[mois_names[i]].apply(mad_format)
                 st.dataframe(agg_mois, use_container_width=True)
 
-        # Graph comparatif live avec noms de mois lisibles
-        st.subheader("Graphique comparatif : Choisis 2 à 12 mois à comparer")
-        mois_selection = st.multiselect(
-            "Sélectionne les mois à comparer (2 à 12 max)",
-            options=mois_names,
-            default=mois_names[:2],
-            max_selections=12
-        )
-        # Mapping noms vers cols pour selection
-        name_to_col = dict(zip(mois_names, mois_cols))
-        if len(mois_selection) >= 2:
-            fig, ax = plt.subplots(figsize=(max(8, 1.6*len(mois_selection)), 5))
-            cols_to_plot = [name_to_col[m] for m in mois_selection]
-            to_plot = agg_annee.loc[:, cols_to_plot]
-            to_plot.columns = mois_selection
-            to_plot = to_plot.fillna(0)
-            to_plot.T.plot(kind="bar", ax=ax)
-            plt.ylabel("Montant (MAD)")
-            plt.xticks(rotation=45, ha="right")
-            plt.legend(loc="best", bbox_to_anchor=(1,1))
-            plt.tight_layout()
-            st.pyplot(fig)
-        else:
-            st.info("Sélectionne au moins 2 mois pour comparer.")
+        # Graphe LIGNES : X = Mois, Y = MAD, chaque segment = 1 courbe
+        st.subheader("Courbe comparatif : évolution des segments par mois (tendance annuelle)")
+        # On pivote pour grapher segments en lignes
+        graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_cols]
+        graph_df.columns = mois_names
+        graph_df = graph_df.T  # now: index=mois_names, columns=segments
+        fig, ax = plt.subplots(figsize=(min(16, 2 + 2*len(SEGMENTS_ORDER)), 6))
+        for seg in SEGMENTS_ORDER:
+            if seg in graph_df.columns:
+                ax.plot(graph_df.index, graph_df[seg], marker="o", label=seg)
+        plt.ylabel("Montant (MAD)")
+        plt.xlabel("Mois")
+        plt.title("Evolution des segments par mois")
+        plt.xticks(rotation=45, ha="right")
+        plt.legend(loc="upper left", bbox_to_anchor=(1,1))
+        plt.tight_layout()
+        st.pyplot(fig)
 
     except Exception as e:
         st.error(f"{e}")

@@ -155,9 +155,13 @@ if uploaded_file is not None:
         mois_headers = []
         for idx, (h4, h5) in enumerate(zip(header4, header5)):
             if h4.startswith("Solde au") and h5 == "Débit":
-                mois_cols.append(df.columns[idx])
+                mois_cols.append(str(df.columns[idx]).strip().replace('\n','').replace('\r',''))
                 mois_headers.append(h4)
         mois_names = [extract_month_name(h) for h in mois_headers]
+
+        # Nettoyage extrême
+        mois_names = [str(m).strip().replace('\n','').replace('\r','') for m in mois_names]
+        mois_cols = [str(m).strip().replace('\n','').replace('\r','') for m in mois_cols]
 
         # -- FORMAT MONTANTS ULTIME --
         for col in mois_cols:
@@ -179,6 +183,7 @@ if uploaded_file is not None:
         st.markdown("### 📊 Tableau annuel (somme de tous les mois) par segment")
         agg_annee = df.groupby("SEGMENT", observed=False)[mois_cols].sum(numeric_only=True)
         agg_annee = agg_annee.reindex(SEGMENTS_ORDER).fillna(0)
+        agg_annee.columns = [str(c).strip().replace('\n','').replace('\r','') for c in agg_annee.columns]
         agg_annee["Total Année"] = agg_annee[mois_cols].sum(axis=1)
         display_agg_annee = agg_annee.copy()
         display_agg_annee.columns = [*mois_names, "Total Année"]
@@ -198,29 +203,19 @@ if uploaded_file is not None:
 
         # -- GRAPHIQUE BARRES GROUPEES avec filtre live --
         st.markdown("### 🔎 Filtrer les segments affichés sur le graphique")
-
-        # DEBUG : Check source of quotes
-        st.write("SEGMENTS_ORDER (raw):", SEGMENTS_ORDER)
-        st.write("Types:", [repr(x) + " - " + str(type(x)) for x in SEGMENTS_ORDER])
-
-        # Nettoyage ultra quotes, typographiques, espaces
-        segments_available = []
-        for seg in SEGMENTS_ORDER:
-            s = str(seg).strip()
-            s = s.replace("’", "") # quote typographique
-            s = s.replace("'", "") # quote normale
-            s = s.replace('"', "") # quote double
-            s = s.strip()
-            segments_available.append(s)
-
-        st.write("SEGMENTS nettoyés:", segments_available)
-
-        graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_cols]
+        # Nettoyage multiselect segments
+        segments_available = [str(seg).replace("’", "").replace("'", "").replace('"', "").strip() for seg in SEGMENTS_ORDER]
+        graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_names]
         graph_df.columns = mois_names
-        graph_df = graph_df.fillna(0)
         indices = range(len(mois_names))
 
-        segments_with_data = [seg for seg in segments_available if graph_df.get(seg, pd.Series()).sum() > 0]
+        # DEBUG visuel !
+        st.write("mois_names:", mois_names)
+        st.write("agg_annee.columns:", list(agg_annee.columns))
+        st.write("graph_df.columns:", list(graph_df.columns))
+        st.write("graph_df preview:", graph_df.head())
+
+        segments_with_data = [seg for seg in segments_available if graph_df.loc[seg].sum() > 0]
         default_selection = segments_with_data if segments_with_data else segments_available
 
         segments_selected = st.multiselect(
@@ -232,10 +227,16 @@ if uploaded_file is not None:
         st.markdown("### 📈 Barres groupées : variation de chaque segment par mois")
         fig, ax = plt.subplots(figsize=(min(14, 2 + 0.9*len(mois_names)), 7))
         if segments_selected:
+            has_data = False
             bar_width = 0.8 / len(segments_selected)
             for i, seg in enumerate(segments_selected):
-                bar_vals = graph_df[seg].values if seg in graph_df else [0]*len(mois_names)
-                ax.bar([x + i*bar_width for x in indices], bar_vals, bar_width, label=seg)
+                if seg in graph_df.index:
+                    bar_vals = graph_df.loc[seg].values
+                    if np.nansum(bar_vals) != 0:
+                        has_data = True
+                    ax.bar([x + i*bar_width for x in indices], bar_vals, bar_width, label=seg)
+                else:
+                    ax.bar([x + i*bar_width for x in indices], [0]*len(mois_names), bar_width, label=seg)
             ax.set_xticks([x + bar_width*len(segments_selected)/2 for x in indices])
             ax.set_xticklabels(mois_names, rotation=45, ha="right")
             ax.set_ylabel("Montant (MAD)")
@@ -243,7 +244,10 @@ if uploaded_file is not None:
             ax.set_title("Variation mensuelle des segments sélectionnés")
             ax.legend(loc="upper left", bbox_to_anchor=(1,1))
             plt.tight_layout()
-            st.pyplot(fig)
+            if has_data:
+                st.pyplot(fig)
+            else:
+                st.warning("Aucune donnée à afficher pour les segments sélectionnés !")
         else:
             st.warning("Sélectionne au moins un segment pour afficher le graphique.")
 

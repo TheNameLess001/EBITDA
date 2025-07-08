@@ -198,18 +198,30 @@ if uploaded_file is not None:
 
         # -- GRAPHIQUE BARRES GROUPEES avec filtre live --
         st.markdown("### 🔎 Filtrer les segments affichés sur le graphique")
+
+        # DEBUG : Check source of quotes
+        st.write("SEGMENTS_ORDER (raw):", SEGMENTS_ORDER)
+        st.write("Types:", [repr(x) + " - " + str(type(x)) for x in SEGMENTS_ORDER])
+
+        # Nettoyage ultra quotes, typographiques, espaces
+        segments_available = []
+        for seg in SEGMENTS_ORDER:
+            s = str(seg).strip()
+            s = s.replace("’", "") # quote typographique
+            s = s.replace("'", "") # quote normale
+            s = s.replace('"', "") # quote double
+            s = s.strip()
+            segments_available.append(s)
+
+        st.write("SEGMENTS nettoyés:", segments_available)
+
         graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_cols]
         graph_df.columns = mois_names
         graph_df = graph_df.fillna(0)
         indices = range(len(mois_names))
 
-        # PATCH: forçage str, suppression quotes/espaces chelous
-        segments_available = [str(seg).replace("'", "").replace('"', "").strip() for seg in SEGMENTS_ORDER]
-        segments_with_data = [seg for seg in segments_available if graph_df[seg].sum() > 0]
+        segments_with_data = [seg for seg in segments_available if graph_df.get(seg, pd.Series()).sum() > 0]
         default_selection = segments_with_data if segments_with_data else segments_available
-
-        st.write("DEBUG segments_available:", segments_available)
-        st.write("DEBUG graph_df columns:", list(graph_df.columns))
 
         segments_selected = st.multiselect(
             "Sélectionne les segments à afficher",

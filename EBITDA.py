@@ -18,7 +18,7 @@ mapping = {
         "INTERETS DES EMPRUNTS ET DETTES"
     ]
 }
-SEGMENTS_ORDER = list(mapping.keys())  # Pas de "Autres" !
+SEGMENTS_ORDER = list(mapping.keys())
 
 def get_segment(nom):
     for seg, lignes in mapping.items():
@@ -26,7 +26,7 @@ def get_segment(nom):
             return seg
     if isinstance(nom, str) and nom.strip().upper() == "INTERETS DES EMPRUNTS ET DETTES":
         return "INTERETS / FINANCE"
-    return None  # <- Important : tout ce qui n'est pas mappé = None
+    return None
 
 def make_unique(seq):
     counter = Counter()
@@ -153,21 +153,25 @@ if uploaded_file is not None:
                 agg_mois[mois_names[i]] = agg_mois[mois_names[i]].apply(mad_format)
                 st.dataframe(agg_mois, use_container_width=True)
 
-        # Graphe LIGNES : X = Mois, Y = MAD, chaque segment = 1 courbe
-        st.subheader("Courbe comparatif : évolution des segments par mois (tendance annuelle)")
-        # On pivote pour grapher segments en lignes
+        # GRAPHIQUE BAR CHART GROUPÉ
+        st.subheader("Barres groupées : variation de chaque segment par mois")
         graph_df = agg_annee.loc[SEGMENTS_ORDER, mois_cols]
         graph_df.columns = mois_names
-        graph_df = graph_df.T  # now: index=mois_names, columns=segments
-        fig, ax = plt.subplots(figsize=(min(16, 2 + 2*len(SEGMENTS_ORDER)), 6))
-        for seg in SEGMENTS_ORDER:
-            if seg in graph_df.columns:
-                ax.plot(graph_df.index, graph_df[seg], marker="o", label=seg)
-        plt.ylabel("Montant (MAD)")
-        plt.xlabel("Mois")
-        plt.title("Evolution des segments par mois")
-        plt.xticks(rotation=45, ha="right")
-        plt.legend(loc="upper left", bbox_to_anchor=(1,1))
+        graph_df = graph_df.T  # index = mois_names, columns = segments
+        # Fillna (robuste, et arrondit si tu veux)
+        graph_df = graph_df.fillna(0)
+        fig, ax = plt.subplots(figsize=(min(14, 1.5+0.9*len(mois_names)), 7))
+        bar_width = 0.8 / len(SEGMENTS_ORDER)
+        indices = range(len(mois_names))
+        for i, seg in enumerate(SEGMENTS_ORDER):
+            bar_vals = graph_df[seg].values if seg in graph_df else [0]*len(mois_names)
+            ax.bar([x + i*bar_width for x in indices], bar_vals, bar_width, label=seg)
+        ax.set_xticks([x + bar_width*len(SEGMENTS_ORDER)/2 for x in indices])
+        ax.set_xticklabels(mois_names, rotation=45, ha="right")
+        ax.set_ylabel("Montant (MAD)")
+        ax.set_xlabel("Mois")
+        ax.set_title("Variation mensuelle des segments (barres groupées)")
+        ax.legend(loc="upper left", bbox_to_anchor=(1,1))
         plt.tight_layout()
         st.pyplot(fig)
 

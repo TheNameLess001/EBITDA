@@ -187,6 +187,21 @@ if uploaded_file is not None:
         display_agg_annee = display_agg_annee.applymap(mad_format)
         st.dataframe(display_agg_annee, use_container_width=True)
 
+        # -- INTERACTION "POP-UP" DÉTAILS SEGMENT --
+        st.markdown("### 🔍 Détail interactif par segment")
+        segment_selected = st.selectbox(
+            "Clique sur un segment pour voir le détail des lignes sources :",
+            [s for s in SEGMENTS_ORDER if s in df['SEGMENT'].unique()]
+        )
+        if segment_selected:
+            with st.expander(f"Détails pour le segment : {segment_selected}", expanded=True):
+                lignes_segment = df[df['SEGMENT'] == segment_selected]
+                display_cols = [detected_intitule_col] + mois_cols
+                display_lignes = lignes_segment[display_cols].copy()
+                for col in mois_cols:
+                    display_lignes[col] = display_lignes[col].apply(mad_format)
+                st.dataframe(display_lignes, use_container_width=True)
+
         # -- TABLEAU PAR MOIS --
         st.markdown("### 📅 Tableaux par mois (scroll horizontal)")
         tabs = st.tabs(mois_names)

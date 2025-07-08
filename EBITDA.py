@@ -103,10 +103,11 @@ if uploaded_file is not None:
             lines = s.splitlines()
             sep_candidates = [';', ',', '\t', '|']
             sep = max(sep_candidates, key=lambda c: lines[3].count(c))
-            header_dates = lines[3].split(sep)  # ligne 4 = index 3
+            header_dates = lines[3].split(sep)
             header_dates = [str(x).strip() for x in header_dates]
+            st.write("Ligne 4 (header_dates):", header_dates)  # PATCH DEBUG
             header_dates = make_unique(header_dates)
-            header_labels = lines[4].split(sep)  # ligne 5 = index 4
+            header_labels = lines[4].split(sep)
             data_lines = lines[5:]
             s_data = "\n".join(data_lines)
             file_buffer = io.StringIO(s_data)
@@ -115,12 +116,13 @@ if uploaded_file is not None:
         else:
             xls = pd.ExcelFile(uploaded_file)
             header_dates = pd.read_excel(xls, header=None, nrows=4).iloc[3].astype(str).str.strip().tolist()
+            st.write("Ligne 4 (header_dates):", header_dates)  # PATCH DEBUG
             header_dates = make_unique(header_dates)
             header_labels = pd.read_excel(xls, header=None, nrows=5).iloc[4].astype(str).str.strip().tolist()
             df = pd.read_excel(xls, header=None, skiprows=5)
             df.columns = header_dates
 
-        # Détection automatique colonne d’intitulé : la première colonne qui matche une valeur du mapping
+        # Détection colonne d’intitulé charges (par mapping)
         charge_names = set()
         for lignes in mapping.values():
             charge_names.update([x.strip().upper() for x in lignes])
@@ -136,7 +138,7 @@ if uploaded_file is not None:
         st.write(f"Colonne des intitulés détectée automatiquement : **{detected_intitule_col}**")
         st.dataframe(df[detected_intitule_col], use_container_width=True)
 
-        # Détecte les colonnes MOIS (via ligne 4 du header)
+        # Détection colonne mois (via ligne 4 du header)
         mois_idx = detect_mois_cols(header_dates)
         mois_cols = [df.columns[idx] for idx in mois_idx]
         st.write(f"Colonnes mois détectées via la ligne 4 : {mois_cols}")
@@ -146,12 +148,10 @@ if uploaded_file is not None:
         for col in mois_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Tableau global multi-mois
         agg = df.groupby("SEGMENT")[mois_cols].sum(numeric_only=True)
         st.subheader("Tableau global – Tous mois, tous segments")
         st.dataframe(agg, use_container_width=True)
 
-        # Vue par mois (tableau + graphique)
         for col in mois_cols:
             agg_mois = df.groupby("SEGMENT")[[col]].sum(numeric_only=True)
             st.subheader(f"Vue par segment – Mois {col}")

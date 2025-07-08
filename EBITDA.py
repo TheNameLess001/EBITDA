@@ -216,7 +216,7 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"{e}")
 
-        st.markdown("### 🧮 Cumul des segments sur la période sélectionnée")
+st.markdown("### 🧮 Cumul des segments sur la période sélectionnée")
 
 if len(mois_names) > 1:
     from_month, to_month = st.select_slider(
@@ -231,6 +231,13 @@ if len(mois_names) > 1:
     selected_months = mois_names[idx_start:idx_end+1]
 else:
     selected_months = mois_names
+
+# On calcule le cumul sur la période sélectionnée
+cumul_df = agg_annee[selected_months].sum(axis=1)
+cumul_table = pd.DataFrame({"CUMUL SELECTIONNÉ": cumul_df})
+cumul_table = cumul_table.applymap(mad_format)
+st.dataframe(cumul_table, use_container_width=True)
+
 
 # On calcule le cumul sur la période sélectionnée
 cumul_df = agg_annee[selected_months].sum(axis=1)

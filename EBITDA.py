@@ -83,7 +83,6 @@ uploaded_file = st.file_uploader("Fichier", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # --- Lecture brute des headers ---
         if uploaded_file.name.endswith('.csv'):
             content = uploaded_file.read()
             encodings = ['utf-8', 'ISO-8859-1', 'latin1']
@@ -139,10 +138,18 @@ if uploaded_file is not None:
                 mois_names.append(h4)
         st.write(f"Colonnes mois (Débit uniquement) : {mois_cols}")
 
-        # Mapping segment
-        df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
+        # Nettoyage & conversion montants français/espaces
         for col in mois_cols:
+            st.write(f"Valeurs brutes dans la colonne {col} :", df[col].head(10))  # Debug
+            df[col] = (
+                df[col].astype(str)
+                .str.replace(",", ".", regex=False)
+                .str.replace(" ", "", regex=False)
+                .str.replace("\u202f", "", regex=False)
+            )
             df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        df["SEGMENT"] = df[detected_intitule_col].apply(get_segment)
 
         agg = df.groupby("SEGMENT")[mois_cols].sum(numeric_only=True)
         st.subheader("Tableau global – Tous mois, tous segments")
